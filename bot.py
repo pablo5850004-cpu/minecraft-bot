@@ -24,7 +24,8 @@ print("="*50)
 BOT_TOKEN = None
 
 # Способ 1: через os.getenv
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
+BOT_TOKEN = "8732938464:AAHIsqjKA8wFCcK8iQi1FRGokH6cf8ypSmY"  # Твой токен
+ADMIN_ID = 5809098591  # Твой ID
 
 # Способ 2: через переменные окружения напрямую
 if not BOT_TOKEN:
