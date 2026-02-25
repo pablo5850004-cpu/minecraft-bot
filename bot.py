@@ -168,6 +168,15 @@ def get_item(table: str, item_id: int):
     return item
 
 @safe_db
+def get_all_items(table: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'SELECT id, name, short_desc, downloads FROM {table} ORDER BY created_at DESC')
+    items = cur.fetchall()
+    conn.close()
+    return items
+
+@safe_db
 def delete_item(table: str, item_id: int):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -194,6 +203,15 @@ def add_client(name: str, short_desc: str, full_desc: str, url: str, min_version
     except Exception as e:
         logger.error(f"Ошибка при добавлении клиента: {e}")
         return None
+
+@safe_db
+def update_client(item_id: int, field: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
+    conn.commit()
+    conn.close()
+    backup_db(f"update_client_{item_id}")
 
 @safe_db
 def get_clients_by_version(version: str, page: int = 1, per_page: int = 10):
@@ -257,6 +275,15 @@ def add_pack(name: str, short_desc: str, full_desc: str, url: str, min_v: str, m
         return None
 
 @safe_db
+def update_pack(item_id: int, field: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
+    conn.commit()
+    conn.close()
+    backup_db(f"update_pack_{item_id}")
+
+@safe_db
 def get_packs_by_version(version: str, page: int = 1, per_page: int = 10):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -317,6 +344,15 @@ def add_config(name: str, short_desc: str, full_desc: str, url: str, min_version
     except Exception as e:
         logger.error(f"Ошибка при добавлении конфига: {e}")
         return None
+
+@safe_db
+def update_config(item_id: int, field: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
+    conn.commit()
+    conn.close()
+    backup_db(f"update_config_{item_id}")
 
 @safe_db
 def get_configs_by_version(version: str, page: int = 1, per_page: int = 10):
@@ -430,6 +466,7 @@ def get_version_display(min_v: str, max_v: str) -> str:
 
 # ========== СОСТОЯНИЯ ==========
 class AdminStates(StatesGroup):
+    # Для клиентов
     client_name = State()
     client_short_desc = State()
     client_full_desc = State()
@@ -438,6 +475,7 @@ class AdminStates(StatesGroup):
     client_url = State()
     client_media = State()
     
+    # Для ресурспаков
     pack_name = State()
     pack_short_desc = State()
     pack_full_desc = State()
@@ -447,6 +485,7 @@ class AdminStates(StatesGroup):
     pack_url = State()
     pack_media = State()
     
+    # Для конфигов
     config_name = State()
     config_short_desc = State()
     config_full_desc = State()
@@ -455,8 +494,11 @@ class AdminStates(StatesGroup):
     config_url = State()
     config_media = State()
     
+    # Для редактирования
     edit_field = State()
     edit_value = State()
+    edit_category = State()
+    edit_item_id = State()
 
 class SearchStates(StatesGroup):
     choosing_category = State()
@@ -534,7 +576,6 @@ def get_item_detail_keyboard(category: str, item_id: int, is_favorite: bool = Fa
     """Клавиатура для детального просмотра"""
     buttons = []
     
-    # Для ресурспаков добавляем кнопку избранного
     if category == "packs":
         fav_text = "❤️" if is_favorite else "🤍"
         buttons.append([
@@ -550,22 +591,74 @@ def get_item_detail_keyboard(category: str, item_id: int, is_favorite: bool = Fa
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_main_keyboard():
+    """Главная клавиатура админ-панели"""
     buttons = [
         [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
         [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
         [InlineKeyboardButton(text="📦 Бэкапы", callback_data="admin_backups")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_category_keyboard(category: str):
+    """Клавиатура действий для категории"""
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить", callback_data=f"add_{category}")],
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{category}")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{category}")],
-        [InlineKeyboardButton(text="📋 Список", callback_data=f"list_{category}")],
+        [InlineKeyboardButton(text="📋 Список всех", callback_data=f"list_{category}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_admin_items_keyboard(items: List[Tuple], category: str, action: str):
+    """Клавиатура со списком элементов для админа"""
+    buttons = []
+    for item_id, name, _, _ in items[:10]:
+        buttons.append([InlineKeyboardButton(
+            text=f"{item_id}. {name[:30]}", 
+            callback_data=f"{action}_{category}_{item_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_edit_fields_keyboard(category: str, item_id: int):
+    """Клавиатура выбора поля для редактирования"""
+    if category == "packs":
+        fields = [
+            ["📝 Название", f"edit_name_{category}_{item_id}"],
+            ["📄 Краткое описание", f"edit_short_{category}_{item_id}"],
+            ["📚 Полное описание", f"edit_full_{category}_{item_id}"],
+            ["🔢 Мин версия", f"edit_min_{category}_{item_id}"],
+            ["🔢 Макс версия", f"edit_max_{category}_{item_id}"],
+            ["✍️ Автор", f"edit_author_{category}_{item_id}"],
+            ["🔗 Ссылка", f"edit_url_{category}_{item_id}"],
+            ["🖼️ Медиа", f"media_admin_{category}_{item_id}"],
+        ]
+    else:
+        fields = [
+            ["📝 Название", f"edit_name_{category}_{item_id}"],
+            ["📄 Краткое описание", f"edit_short_{category}_{item_id}"],
+            ["📚 Полное описание", f"edit_full_{category}_{item_id}"],
+            ["🔢 Мин версия", f"edit_min_{category}_{item_id}"],
+            ["🔢 Макс версия", f"edit_max_{category}_{item_id}"],
+            ["🔗 Ссылка", f"edit_url_{category}_{item_id}"],
+            ["🖼️ Медиа", f"media_admin_{category}_{item_id}"],
+        ]
+    
+    buttons = [[InlineKeyboardButton(text=text, callback_data=cb)] for text, cb in fields]
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_media_admin_keyboard(category: str, item_id: int):
+    """Клавиатура управления медиа для админа"""
+    buttons = [
+        [InlineKeyboardButton(text="📸 Добавить фото", callback_data=f"media_photo_{category}_{item_id}")],
+        [InlineKeyboardButton(text="🎬 Добавить видео/GIF", callback_data=f"media_video_{category}_{item_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить медиа", callback_data=f"media_del_{category}_{item_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_{item_id}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -761,11 +854,14 @@ async def view_item(callback: CallbackQuery, state: FSMContext):
                 f"{version_text}\n"
                 f"Скачиваний: {format_number(item[8])}\n"
                 f"Просмотров: {format_number(item[9])}")
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_item_detail_keyboard(category, item_id)
+        )
     elif category == "packs":
         media_list = json.loads(item[4]) if item[4] else []
         version_text = get_version_display(item[6], item[7])
         
-        # Проверяем избранное
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', 
@@ -785,8 +881,6 @@ async def view_item(callback: CallbackQuery, state: FSMContext):
             text,
             reply_markup=get_item_detail_keyboard(category, item_id, is_fav)
         )
-        await callback.answer()
-        return
     else:
         media_list = json.loads(item[4]) if item[4] else []
         version_text = get_version_display(item[6], item[7])
@@ -795,11 +889,11 @@ async def view_item(callback: CallbackQuery, state: FSMContext):
                 f"{version_text}\n"
                 f"Скачиваний: {format_number(item[8])}\n"
                 f"Просмотров: {format_number(item[9])}")
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_item_detail_keyboard(category, item_id)
+        )
     
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_item_detail_keyboard(category, item_id)
-    )
     await callback.answer()
 
 # ========== НАВИГАЦИЯ НАЗАД ==========
@@ -845,7 +939,7 @@ async def download_item(callback: CallbackQuery):
     increment_download(category, item_id)
     backup_db(f"download_{category}_{item_id}")
     
-    url = item[5]  # download_url
+    url = item[5]
     name = item[1]
     
     await callback.message.answer(
@@ -892,7 +986,6 @@ async def favorite_handler(callback: CallbackQuery):
     else:
         await callback.answer("💔 Удалено из избранного")
     
-    # Обновляем отображение
     await view_item(callback, None)
 
 # ========== ПОИСК ==========
@@ -909,12 +1002,11 @@ async def search_category_selected(callback: CallbackQuery, state: FSMContext):
     category = callback.data.replace("search_", "")
     await state.update_data(search_category=category)
     await state.set_state(SearchStates.waiting_for_query)
-    await callback.message.edit_text(f"🔍 Введи поисковый запрос:")
+    await callback.message.edit_text("🔍 Введи поисковый запрос:")
     await callback.answer()
 
 @dp.message(SearchStates.waiting_for_query)
 async def search_execute(message: Message, state: FSMContext):
-    # Здесь нужно реализовать поиск
     await message.answer("⚠️ Поиск временно недоступен")
     await state.clear()
 
@@ -952,7 +1044,7 @@ async def info(message: Message):
         await message.answer(
             f"Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 5.1\n\n"
+            f"Версия: 5.2\n\n"
             f"Статистика:\n"
             f"• Клиентов: {clients}\n"
             f"• Ресурспаков: {packs}\n"
@@ -963,7 +1055,7 @@ async def info(message: Message):
         await message.answer(
             f"Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 5.1"
+            f"Версия: 5.2"
         )
 
 # ========== ПОМОЩЬ ==========
@@ -1058,6 +1150,191 @@ async def admin_category(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ========== АДМИН: ДОБАВЛЕНИЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("add_") and c.data not in ["add_clients", "add_packs", "add_configs"])
+async def add_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    category = callback.data.replace("add_", "")
+    await state.update_data(category=category)
+    
+    if category == "packs":
+        await state.set_state(AdminStates.pack_name)
+        await callback.message.edit_text("📝 Введи название ресурспака:")
+    elif category == "clients":
+        await state.set_state(AdminStates.client_name)
+        await callback.message.edit_text("📝 Введи название клиента:")
+    else:
+        await state.set_state(AdminStates.config_name)
+        await callback.message.edit_text("📝 Введи название конфига:")
+    
+    await callback.answer()
+
+# ========== АДМИН: СПИСОК ==========
+@dp.callback_query(lambda c: c.data.startswith("list_") and c.data not in ["list_clients", "list_packs", "list_configs"])
+async def list_items(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    category = callback.data.replace("list_", "")
+    items = get_all_items(category)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Список пуст",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    text = f"📋 Список элементов:\n\n"
+    for item_id, name, short_desc, downloads in items:
+        text += f"{item_id}. {name} - {short_desc[:30]}... 📥 {downloads}\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]
+        ])
+    )
+    await callback.answer()
+
+# ========== АДМИН: УДАЛЕНИЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("delete_") and c.data not in ["delete_clients", "delete_packs", "delete_configs"])
+async def delete_start(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    category = callback.data.replace("delete_", "")
+    items = get_all_items(category)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет элементов для удаления",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "🗑 Выбери элемент для удаления:",
+        reply_markup=get_admin_items_keyboard(items, category, "delete_confirm")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_confirm_"))
+async def delete_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    _, category, item_id = callback.data.split("_", 2)
+    item_id = int(item_id)
+    
+    delete_item(category, item_id)
+    
+    await callback.answer("✅ Удалено!", show_alert=True)
+    await delete_start(callback)
+
+# ========== АДМИН: РЕДАКТИРОВАНИЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("edit_") and c.data not in ["edit_clients", "edit_packs", "edit_configs"])
+async def edit_start(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    category = callback.data.replace("edit_", "")
+    items = get_all_items(category)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет элементов для редактирования",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "✏️ Выбери элемент для редактирования:",
+        reply_markup=get_admin_items_keyboard(items, category, "edit_select")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_select_"))
+async def edit_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    _, category, item_id = callback.data.split("_", 2)
+    item_id = int(item_id)
+    
+    await state.update_data(edit_category=category, edit_item_id=item_id)
+    
+    await callback.message.edit_text(
+        "✏️ Что изменить?",
+        reply_markup=get_edit_fields_keyboard(category, item_id)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_name_") or c.data.startswith("edit_short_") or
+                            c.data.startswith("edit_full_") or c.data.startswith("edit_min_") or
+                            c.data.startswith("edit_max_") or c.data.startswith("edit_author_") or
+                            c.data.startswith("edit_url_") or c.data.startswith("edit_version_"))
+async def edit_field(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    action, category, item_id = callback.data.split("_", 2)
+    field_map = {
+        'edit_name': 'name',
+        'edit_short': 'short_desc',
+        'edit_full': 'full_desc',
+        'edit_min': 'min_version',
+        'edit_max': 'max_version',
+        'edit_author': 'author',
+        'edit_url': 'download_url',
+        'edit_version': 'game_version'
+    }
+    
+    field = field_map.get(action)
+    if not field:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    
+    await state.update_data(edit_field=field)
+    await state.set_state(AdminStates.edit_value)
+    await callback.message.edit_text("✏️ Введи новое значение:")
+    await callback.answer()
+
+@dp.message(AdminStates.edit_value)
+async def edit_value(message: Message, state: FSMContext):
+    data = await state.get_data()
+    category = data['edit_category']
+    item_id = data['edit_item_id']
+    field = data['edit_field']
+    
+    if category == 'clients':
+        update_client(item_id, field, message.text)
+    elif category == 'packs':
+        update_pack(item_id, field, message.text)
+    else:
+        update_config(item_id, field, message.text)
+    
+    await state.clear()
+    await message.answer("✅ Обновлено!", reply_markup=get_main_keyboard(is_admin=True))
+
 # ========== БЭКАПЫ ==========
 @dp.callback_query(lambda c: c.data == "admin_backups")
 async def admin_backups(callback: CallbackQuery):
@@ -1077,6 +1354,25 @@ async def admin_backups(callback: CallbackQuery):
         reply_markup=get_backups_keyboard()
     )
     await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("restore_"))
+async def restore_backup(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    backup_name = callback.data.replace("restore_", "")
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        await callback.answer("❌ Бэкап не найден", show_alert=True)
+        return
+    
+    backup_db("before_restore")
+    shutil.copy2(backup_path, DB_PATH)
+    
+    await callback.answer("✅ База данных восстановлена!", show_alert=True)
+    await admin_back(callback)
 
 # ========== СТАТИСТИКА ==========
 @dp.callback_query(lambda c: c.data == "admin_stats")
