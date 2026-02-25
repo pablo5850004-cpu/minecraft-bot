@@ -985,7 +985,7 @@ async def info(message: Message):
     await message.answer(
         f"Информация о боте\n\n"
         f"Создатель: {CREATOR_USERNAME}\n"
-        f"Версия: 6.1\n\n"
+        f"Версия: 6.2\n\n"
         f"📊 Статистика будет добавлена позже"
     )
 
@@ -1099,7 +1099,7 @@ async def admin_configs(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== АДМИН: ДОБАВЛЕНИЕ ==========
+# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
 @dp.callback_query(lambda c: c.data == "add_clients")
 async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -1110,27 +1110,6 @@ async def add_client_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("📝 Введи название клиента:")
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "add_packs")
-async def add_pack_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await state.set_state(AdminStates.pack_name)
-    await callback.message.edit_text("📝 Введи название ресурспака:")
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "add_configs")
-async def add_config_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await state.set_state(AdminStates.config_name)
-    await callback.message.edit_text("📝 Введи название конфига:")
-    await callback.answer()
-
-# Клиенты
 @dp.message(AdminStates.client_name)
 async def client_name(message: Message, state: FSMContext):
     await state.update_data(client_name=message.text)
@@ -1159,13 +1138,42 @@ async def client_version(message: Message, state: FSMContext):
 async def client_url(message: Message, state: FSMContext):
     await state.update_data(client_url=message.text)
     await state.set_state(AdminStates.client_media)
-    await message.answer("🖼️ Отправь фото (или напиши 'пропустить'):")
+    await message.answer(
+        "🖼️ Отправляй фото (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:"
+    )
 
 @dp.message(AdminStates.client_media)
 async def client_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
     
+    # Проверяем команду "готово"
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_client(
+            data['client_name'],
+            data['client_short_desc'],
+            data['client_full_desc'],
+            data['client_url'],
+            data['client_version'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ Клиент добавлен! ID: {item_id}\n"
+                f"Добавлено фото: {len(media_list)}",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    # Проверяем команду "пропустить"
     if message.text and message.text.lower() == 'пропустить':
         item_id = add_client(
             data['client_name'],
@@ -1177,19 +1185,41 @@ async def client_media(message: Message, state: FSMContext):
         )
         await state.clear()
         if item_id:
-            await message.answer(f"✅ Клиент добавлен! ID: {item_id}", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Клиент добавлен! ID: {item_id} (без фото)",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         else:
-            await message.answer("❌ Ошибка при добавлении", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
     
+    # Обработка фото
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
-        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nОтправь ещё или 'пропустить'")
+        await message.answer(
+            f"✅ Фото добавлено! Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**"
+        )
     else:
-        await message.answer("❌ Отправь фото или 'пропустить'")
+        await message.answer(
+            "❌ Отправь фото, или напиши **готово** / **пропустить**"
+        )
 
-# Ресурспаки
+# ========== АДМИН: ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
+@dp.callback_query(lambda c: c.data == "add_packs")
+async def add_pack_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.pack_name)
+    await callback.message.edit_text("📝 Введи название ресурспака:")
+    await callback.answer()
+
 @dp.message(AdminStates.pack_name)
 async def pack_name(message: Message, state: FSMContext):
     await state.update_data(pack_name=message.text)
@@ -1224,12 +1254,40 @@ async def pack_author(message: Message, state: FSMContext):
 async def pack_url(message: Message, state: FSMContext):
     await state.update_data(pack_url=message.text)
     await state.set_state(AdminStates.pack_media)
-    await message.answer("🖼️ Отправь фото (или напиши 'пропустить'):")
+    await message.answer(
+        "🖼️ Отправляй фото (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:"
+    )
 
 @dp.message(AdminStates.pack_media)
 async def pack_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_pack(
+            data['pack_name'],
+            data['pack_short_desc'],
+            data['pack_full_desc'],
+            data['pack_url'],
+            data['pack_version'],
+            data['pack_author'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ Ресурспак добавлен! ID: {item_id}\n"
+                f"Добавлено фото: {len(media_list)}",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
     
     if message.text and message.text.lower() == 'пропустить':
         item_id = add_pack(
@@ -1243,19 +1301,40 @@ async def pack_media(message: Message, state: FSMContext):
         )
         await state.clear()
         if item_id:
-            await message.answer(f"✅ Ресурспак добавлен! ID: {item_id}", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Ресурспак добавлен! ID: {item_id} (без фото)",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         else:
-            await message.answer("❌ Ошибка при добавлении", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
     
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
-        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nОтправь ещё или 'пропустить'")
+        await message.answer(
+            f"✅ Фото добавлено! Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**"
+        )
     else:
-        await message.answer("❌ Отправь фото или 'пропустить'")
+        await message.answer(
+            "❌ Отправь фото, или напиши **готово** / **пропустить**"
+        )
 
-# Конфиги
+# ========== АДМИН: ДОБАВЛЕНИЕ КОНФИГА ==========
+@dp.callback_query(lambda c: c.data == "add_configs")
+async def add_config_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.config_name)
+    await callback.message.edit_text("📝 Введи название конфига:")
+    await callback.answer()
+
 @dp.message(AdminStates.config_name)
 async def config_name(message: Message, state: FSMContext):
     await state.update_data(config_name=message.text)
@@ -1284,12 +1363,39 @@ async def config_version(message: Message, state: FSMContext):
 async def config_url(message: Message, state: FSMContext):
     await state.update_data(config_url=message.text)
     await state.set_state(AdminStates.config_media)
-    await message.answer("🖼️ Отправь фото (или напиши 'пропустить'):")
+    await message.answer(
+        "🖼️ Отправляй фото (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:"
+    )
 
 @dp.message(AdminStates.config_media)
 async def config_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_config(
+            data['config_name'],
+            data['config_short_desc'],
+            data['config_full_desc'],
+            data['config_url'],
+            data['config_version'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ Конфиг добавлен! ID: {item_id}\n"
+                f"Добавлено фото: {len(media_list)}",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
     
     if message.text and message.text.lower() == 'пропустить':
         item_id = add_config(
@@ -1302,17 +1408,28 @@ async def config_media(message: Message, state: FSMContext):
         )
         await state.clear()
         if item_id:
-            await message.answer(f"✅ Конфиг добавлен! ID: {item_id}", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Конфиг добавлен! ID: {item_id} (без фото)",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         else:
-            await message.answer("❌ Ошибка при добавлении", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                "❌ Ошибка при добавлении",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
     
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
-        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nОтправь ещё или 'пропустить'")
+        await message.answer(
+            f"✅ Фото добавлено! Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**"
+        )
     else:
-        await message.answer("❌ Отправь фото или 'пропустить'")
+        await message.answer(
+            "❌ Отправь фото, или напиши **готово** / **пропустить**"
+        )
 
 # ========== АДМИН: РЕДАКТИРОВАНИЕ ==========
 @dp.callback_query(lambda c: c.data == "edit_clients")
