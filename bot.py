@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import random
+import shutil
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from aiogram import Bot, Dispatcher, types, F
@@ -26,26 +27,45 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # ========== ИСПРАВЛЕННАЯ БАЗА ДАННЫХ ==========
+def check_and_fix_db():
+    """Проверка и восстановление базы данных"""
+    db_path = 'clients.db'
+    
+    # Создаём бэкап повреждённой БД если она есть
+    if os.path.exists(db_path):
+        try:
+            # Пробуем открыть
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            conn.close()
+            print("✅ База данных в порядке")
+            return True
+        except sqlite3.DatabaseError:
+            print("⚠️ База данных повреждена, создаём бэкап и новую...")
+            # Создаём бэкап
+            if os.path.exists(db_path):
+                backup_name = f"clients_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                shutil.copy(db_path, backup_name)
+                print(f"📦 Бэкап сохранён как {backup_name}")
+                # Удаляем повреждённый файл
+                os.remove(db_path)
+    
+    return False
+
 def init_db():
     """Создание всех таблиц с обработкой ошибок"""
     db_path = 'clients.db'
     
-    # Если файл БД повреждён - удаляем его и создаём новый
-    if os.path.exists(db_path):
-        try:
-            # Пробуем открыть БД для проверки
-            test_conn = sqlite3.connect(db_path)
-            test_cur = test_conn.cursor()
-            test_cur.execute("SELECT 1")
-            test_conn.close()
-            print("✅ Существующая БД в порядке")
-        except sqlite3.DatabaseError:
-            print("⚠️ База данных повреждена, создаём новую...")
-            os.remove(db_path)
+    # Проверяем и чиним БД
+    check_and_fix_db()
     
     # Создаём новую БД
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
+    
+    # Включаем поддержку внешних ключей
+    cur.execute('PRAGMA foreign_keys = ON')
     
     # Клиенты
     cur.execute('''
@@ -113,7 +133,15 @@ def init_db():
     print("✅ База данных успешно создана!")
 
 # Инициализируем БД при запуске
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"⚠️ Ошибка при создании БД: {e}")
+    print("🔄 Пробуем ещё раз...")
+    # Если не получилось, удаляем и создаём заново
+    if os.path.exists('clients.db'):
+        os.remove('clients.db')
+    init_db()
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 def get_item(table: str, item_id: int) -> Optional[Tuple]:
@@ -129,6 +157,8 @@ def get_item(table: str, item_id: int) -> Optional[Tuple]:
         print(f"⚠️ Ошибка БД в get_item, пересоздаём...")
         init_db()
         return None
+
+# ... остальной код функции остаётся без изменений ...
 
 def get_all_items(table: str) -> List[Tuple]:
     """Получить все элементы"""
