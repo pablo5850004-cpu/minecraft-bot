@@ -16,8 +16,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = 5809098591  # Твой ID
-CREATOR_USERNAME = "@Strann1k_fiol"  # Создатель бота
+ADMIN_ID = 5809098591
+CREATOR_USERNAME = "@Strann1k_fiol"
 
 if not BOT_TOKEN:
     raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
@@ -33,7 +33,6 @@ dp = Dispatcher(storage=storage)
 DB_PATH = 'clients.db'
 BACKUP_DIR = 'backups'
 
-# Создаём папку для бэкапов
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 def backup_db(comment: str = ""):
@@ -48,7 +47,6 @@ def backup_db(comment: str = ""):
             shutil.copy2(DB_PATH, backup_path)
             logger.info(f"✅ Бэкап создан: {backup_name}")
             
-            # Оставляем только последние 20 бэкапов
             backups = sorted(os.listdir(BACKUP_DIR))
             while len(backups) > 20:
                 os.remove(os.path.join(BACKUP_DIR, backups[0]))
@@ -74,7 +72,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
-    # Клиенты (с диапазоном версий)
+    # Клиенты
     cur.execute('''
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +89,7 @@ def init_db():
         )
     ''')
     
-    # Ресурспаки (уже есть диапазон)
+    # Ресурспаки
     cur.execute('''
         CREATE TABLE IF NOT EXISTS resourcepacks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +108,7 @@ def init_db():
         )
     ''')
     
-    # Конфиги (с диапазоном версий)
+    # Конфиги
     cur.execute('''
         CREATE TABLE IF NOT EXISTS configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,53 +168,6 @@ def get_item(table: str, item_id: int):
     return item
 
 @safe_db
-def get_all_items(table: str, page: int = 1, per_page: int = 10):
-    """Получить все элементы с пагинацией"""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    offset = (page - 1) * per_page
-    cur.execute(f'SELECT id, name, short_desc, media, downloads, views FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', 
-                (per_page, offset))
-    items = cur.fetchall()
-    
-    cur.execute(f'SELECT COUNT(*) FROM {table}')
-    total = cur.fetchone()[0]
-    conn.close()
-    return items, total
-
-@safe_db
-def search_items(table: str, query: str, page: int = 1, per_page: int = 10):
-    """Поиск элементов по названию и описанию"""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    offset = (page - 1) * per_page
-    search_term = f"%{query}%"
-    
-    cur.execute(f'''
-        SELECT id, name, short_desc, media, downloads, views 
-        FROM {table} 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-        ORDER BY 
-            CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN name LIKE ? THEN 2
-                ELSE 3
-            END,
-            downloads DESC
-        LIMIT ? OFFSET ?
-    ''', (search_term, search_term, search_term, query, f"{query}%", per_page, offset))
-    
-    items = cur.fetchall()
-    
-    cur.execute(f'''
-        SELECT COUNT(*) FROM {table} 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-    ''', (search_term, search_term, search_term))
-    total = cur.fetchone()[0]
-    conn.close()
-    return items, total
-
-@safe_db
 def delete_item(table: str, item_id: int):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -225,9 +176,8 @@ def delete_item(table: str, item_id: int):
     conn.close()
     backup_db(f"delete_{table}_{item_id}")
 
-# Клиенты
+# ========== ФУНКЦИИ ДЛЯ КЛИЕНТОВ ==========
 def add_client(name: str, short_desc: str, full_desc: str, url: str, min_version: str, max_version: str, media: List[Dict] = None):
-    """Добавить клиента с диапазоном версий и вернуть ID"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -239,7 +189,6 @@ def add_client(name: str, short_desc: str, full_desc: str, url: str, min_version
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
-        logger.info(f"✅ Клиент добавлен с ID: {item_id}")
         backup_db(f"add_client_{item_id}")
         return item_id
     except Exception as e:
@@ -247,17 +196,7 @@ def add_client(name: str, short_desc: str, full_desc: str, url: str, min_version
         return None
 
 @safe_db
-def update_client(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
-    backup_db(f"update_client_{item_id}")
-
-@safe_db
 def get_clients_by_version(version: str, page: int = 1, per_page: int = 10):
-    """Получить клиентов по версии (с учётом диапазона)"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
@@ -285,40 +224,21 @@ def get_clients_by_version(version: str, page: int = 1, per_page: int = 10):
     return items, total
 
 @safe_db
-def search_clients(query: str, page: int = 1, per_page: int = 10):
-    """Поиск по клиентам"""
+def get_all_client_versions():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    offset = (page - 1) * per_page
-    search_term = f"%{query}%"
-    
-    cur.execute('''
-        SELECT id, name, short_desc, media, downloads, views, min_version, max_version 
-        FROM clients 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-        ORDER BY 
-            CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN name LIKE ? THEN 2
-                ELSE 3
-            END,
-            downloads DESC
-        LIMIT ? OFFSET ?
-    ''', (search_term, search_term, search_term, query, f"{query}%", per_page, offset))
-    
-    items = cur.fetchall()
-    
-    cur.execute('''
-        SELECT COUNT(*) FROM clients 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-    ''', (search_term, search_term, search_term))
-    total = cur.fetchone()[0]
+    cur.execute('SELECT DISTINCT min_version FROM clients UNION SELECT DISTINCT max_version FROM clients')
+    versions = set()
+    for v in cur.fetchall():
+        try:
+            versions.add(str(float(v[0])))
+        except:
+            pass
     conn.close()
-    return items, total
+    return sorted(list(versions), key=lambda x: float(x))
 
-# Ресурспаки
+# ========== ФУНКЦИИ ДЛЯ РЕСУРСПАКОВ ==========
 def add_pack(name: str, short_desc: str, full_desc: str, url: str, min_v: str, max_v: str, author: str, media: List[Dict] = None):
-    """Добавить ресурспак и вернуть ID"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -330,7 +250,6 @@ def add_pack(name: str, short_desc: str, full_desc: str, url: str, min_v: str, m
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
-        logger.info(f"✅ Ресурспак добавлен с ID: {item_id}")
         backup_db(f"add_pack_{item_id}")
         return item_id
     except Exception as e:
@@ -338,17 +257,7 @@ def add_pack(name: str, short_desc: str, full_desc: str, url: str, min_v: str, m
         return None
 
 @safe_db
-def update_pack(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
-    backup_db(f"update_pack_{item_id}")
-
-@safe_db
 def get_packs_by_version(version: str, page: int = 1, per_page: int = 10):
-    """Получить ресурспаки с пагинацией"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
@@ -377,40 +286,21 @@ def get_packs_by_version(version: str, page: int = 1, per_page: int = 10):
     return packs, total
 
 @safe_db
-def search_packs(query: str, page: int = 1, per_page: int = 10):
-    """Поиск по ресурспакам"""
+def get_all_pack_versions():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    offset = (page - 1) * per_page
-    search_term = f"%{query}%"
-    
-    cur.execute('''
-        SELECT id, name, short_desc, media, downloads, likes, views, min_version, max_version, author 
-        FROM resourcepacks 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ? OR author LIKE ?
-        ORDER BY 
-            CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN name LIKE ? THEN 2
-                ELSE 3
-            END,
-            downloads DESC
-        LIMIT ? OFFSET ?
-    ''', (search_term, search_term, search_term, search_term, query, f"{query}%", per_page, offset))
-    
-    items = cur.fetchall()
-    
-    cur.execute('''
-        SELECT COUNT(*) FROM resourcepacks 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ? OR author LIKE ?
-    ''', (search_term, search_term, search_term, search_term))
-    total = cur.fetchone()[0]
+    cur.execute('SELECT DISTINCT min_version FROM resourcepacks UNION SELECT DISTINCT max_version FROM resourcepacks')
+    versions = set()
+    for v in cur.fetchall():
+        try:
+            versions.add(str(float(v[0])))
+        except:
+            pass
     conn.close()
-    return items, total
+    return sorted(list(versions), key=lambda x: float(x))
 
-# Конфиги
+# ========== ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
 def add_config(name: str, short_desc: str, full_desc: str, url: str, min_version: str, max_version: str, media: List[Dict] = None):
-    """Добавить конфиг с диапазоном версий и вернуть ID"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -422,7 +312,6 @@ def add_config(name: str, short_desc: str, full_desc: str, url: str, min_version
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
-        logger.info(f"✅ Конфиг добавлен с ID: {item_id}")
         backup_db(f"add_config_{item_id}")
         return item_id
     except Exception as e:
@@ -431,7 +320,6 @@ def add_config(name: str, short_desc: str, full_desc: str, url: str, min_version
 
 @safe_db
 def get_configs_by_version(version: str, page: int = 1, per_page: int = 10):
-    """Получить конфиги по версии (с учётом диапазона)"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
@@ -459,38 +347,20 @@ def get_configs_by_version(version: str, page: int = 1, per_page: int = 10):
     return items, total
 
 @safe_db
-def search_configs(query: str, page: int = 1, per_page: int = 10):
-    """Поиск по конфигам"""
+def get_all_config_versions():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    offset = (page - 1) * per_page
-    search_term = f"%{query}%"
-    
-    cur.execute('''
-        SELECT id, name, short_desc, media, downloads, views, min_version, max_version 
-        FROM configs 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-        ORDER BY 
-            CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN name LIKE ? THEN 2
-                ELSE 3
-            END,
-            downloads DESC
-        LIMIT ? OFFSET ?
-    ''', (search_term, search_term, search_term, query, f"{query}%", per_page, offset))
-    
-    items = cur.fetchall()
-    
-    cur.execute('''
-        SELECT COUNT(*) FROM configs 
-        WHERE name LIKE ? OR short_desc LIKE ? OR full_desc LIKE ?
-    ''', (search_term, search_term, search_term))
-    total = cur.fetchone()[0]
+    cur.execute('SELECT DISTINCT min_version FROM configs UNION SELECT DISTINCT max_version FROM configs')
+    versions = set()
+    for v in cur.fetchall():
+        try:
+            versions.add(str(float(v[0])))
+        except:
+            pass
     conn.close()
-    return items, total
+    return sorted(list(versions), key=lambda x: float(x))
 
-# Общие функции
+# ========== ОБЩИЕ ФУНКЦИИ ==========
 @safe_db
 def increment_view(table: str, item_id: int):
     conn = sqlite3.connect(DB_PATH)
@@ -509,7 +379,6 @@ def increment_download(table: str, item_id: int):
 
 @safe_db
 def toggle_favorite(user_id: int, pack_id: int) -> bool:
-    """Добавить/удалить из избранного"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
@@ -531,7 +400,6 @@ def toggle_favorite(user_id: int, pack_id: int) -> bool:
 
 @safe_db
 def get_favorites(user_id: int):
-    """Получить избранное пользователя"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute('''
@@ -554,17 +422,7 @@ def format_number(num: int) -> str:
     else:
         return f"{num/1000000:.1f}M"
 
-def get_media_preview(media_list: List[Dict]) -> Optional[str]:
-    """Получить первое фото для превью"""
-    if not media_list:
-        return None
-    for media in media_list:
-        if media['type'] == 'photo':
-            return media['id']
-    return None
-
-def get_version_range_display(min_v: str, max_v: str) -> str:
-    """Получить отображение диапазона версий"""
+def get_version_display(min_v: str, max_v: str) -> str:
     if min_v == max_v:
         return f"Версия: {min_v}"
     else:
@@ -600,23 +458,13 @@ class AdminStates(StatesGroup):
     edit_field = State()
     edit_value = State()
 
-class BrowseStates(StatesGroup):
-    viewing = State()
-    media_view = State()
-
 class SearchStates(StatesGroup):
     choosing_category = State()
     waiting_for_query = State()
-    viewing_results = State()
-
-class VersionStates(StatesGroup):
-    choosing_category = State()
-    waiting_for_version = State()
-    viewing_results = State()
 
 # ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard(is_admin: bool = False):
-    """Главная клавиатура (компактная, в 2 ряда)"""
+    """Главная клавиатура"""
     buttons = [
         [
             types.KeyboardButton(text="🎮 Клиенты"),
@@ -636,69 +484,22 @@ def get_main_keyboard(is_admin: bool = False):
         buttons.append([types.KeyboardButton(text="⚙️ Админ панель")])
     return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-def get_version_selection_keyboard(category: str):
-    """Клавиатура для выбора версии"""
-    # Основные версии Minecraft
-    versions = ["1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", 
-                "1.16", "1.17", "1.18", "1.19", "1.20", "1.21"]
-    
+def get_version_keyboard(versions: List[str], category: str):
+    """Клавиатура выбора версии"""
     buttons = []
     row = []
-    for i, v in enumerate(versions):
+    for v in versions:
         row.append(InlineKeyboardButton(text=v, callback_data=f"ver_{category}_{v}"))
-        if len(row) == 3:  # По 3 кнопки в ряд
+        if len(row) == 3:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
-    
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_help_keyboard():
-    """Клавиатура для раздела помощи"""
-    buttons = [
-        [InlineKeyboardButton(text="👤 Связаться с админом", url=f"https://t.me/{CREATOR_USERNAME[1:]}")],
-        [InlineKeyboardButton(text="📋 Правила", callback_data="help_rules")],
-        [InlineKeyboardButton(text="❓ Частые вопросы", callback_data="help_faq")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def get_search_category_keyboard():
-    """Клавиатура выбора категории для поиска"""
-    buttons = [
-        [InlineKeyboardButton(text="🎮 Клиенты", callback_data="search_clients")],
-        [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="search_packs")],
-        [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="search_configs")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def get_admin_main_keyboard():
-    """Главное меню админ-панели"""
-    buttons = [
-        [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
-        [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
-        [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
-        [InlineKeyboardButton(text="📦 Бэкапы", callback_data="admin_backups")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def get_admin_category_keyboard(category: str):
-    """Меню действий для категории"""
-    buttons = [
-        [InlineKeyboardButton(text="➕ Добавить", callback_data=f"add_{category}")],
-        [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{category}")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{category}")],
-        [InlineKeyboardButton(text="📋 Список", callback_data=f"list_{category}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def get_items_page_keyboard(items: List[Tuple], category: str, page: int, total_pages: int, search_query: str = None):
-    """Клавиатура со списком элементов и пагинацией"""
+def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages: int):
+    """Клавиатура со списком элементов"""
     buttons = []
     for item in items:
         item_id = item[0]
@@ -720,40 +521,73 @@ def get_items_page_keyboard(items: List[Tuple], category: str, page: int, total_
     # Пагинация
     nav_row = []
     if page > 1:
-        if search_query:
-            nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"search_page_{category}_{search_query}_{page-1}"))
-        else:
-            nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"page_{category}_{page-1}"))
-    
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"page_{category}_{page-1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
-    
     if page < total_pages:
-        if search_query:
-            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"search_page_{category}_{search_query}_{page+1}"))
-        else:
-            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"page_{category}_{page+1}"))
-    
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"page_{category}_{page+1}"))
     if nav_row:
         buttons.append(nav_row)
     
-    if search_query:
-        buttons.append([InlineKeyboardButton(text="◀️ Новый поиск", callback_data="back_to_search")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_item_detail_keyboard(category: str, item_id: int, is_favorite: bool = False):
+    """Клавиатура для детального просмотра"""
+    buttons = []
+    
+    # Для ресурспаков добавляем кнопку избранного
+    if category == "packs":
+        fav_text = "❤️" if is_favorite else "🤍"
+        buttons.append([
+            InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}"),
+            InlineKeyboardButton(text=fav_text, callback_data=f"fav_{category}_{item_id}")
+        ])
     else:
-        buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_to_main")])
+        buttons.append([InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}")])
+    
+    buttons.append([InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"media_{category}_{item_id}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"back_{category}")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_item_detail_keyboard(category: str, item_id: int):
-    """Клавиатура для детального просмотра"""
+def get_admin_main_keyboard():
     buttons = [
-        [InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}")],
-        [InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"media_{category}_{item_id}")],
-        [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"back_to_list_{category}")]
+        [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
+        [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
+        [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
+        [InlineKeyboardButton(text="📦 Бэкапы", callback_data="admin_backups")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_admin_category_keyboard(category: str):
+    buttons = [
+        [InlineKeyboardButton(text="➕ Добавить", callback_data=f"add_{category}")],
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{category}")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{category}")],
+        [InlineKeyboardButton(text="📋 Список", callback_data=f"list_{category}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_help_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="👤 Связаться с админом", url=f"https://t.me/{CREATOR_USERNAME[1:]}")],
+        [InlineKeyboardButton(text="📋 Правила", callback_data="help_rules")],
+        [InlineKeyboardButton(text="❓ Часто задаваемые вопросы", callback_data="help_faq")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_search_category_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="🎮 Клиенты", callback_data="search_clients")],
+        [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="search_packs")],
+        [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="search_configs")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_backups_keyboard():
-    """Клавиатура со списком бэкапов"""
     try:
         backups = sorted(os.listdir(BACKUP_DIR), reverse=True)[:10]
         buttons = []
@@ -771,10 +605,9 @@ def get_backups_keyboard():
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    """Старт бота"""
     is_admin = (message.from_user.id == ADMIN_ID)
     await message.answer(
-        "👋 **Привет! Я бот-каталог Minecraft**\n\n"
+        "👋 Привет! Я бот-каталог Minecraft\n\n"
         "🎮 Клиенты - моды и сборки\n"
         "🎨 Ресурспаки - текстурпаки\n"
         "🔍 Поиск - найди что хочешь\n"
@@ -782,18 +615,314 @@ async def cmd_start(message: Message):
         "⚙️ Конфиги - настройки\n"
         "ℹ️ Инфо - о боте и создателе\n"
         "❓ Помощь - связаться с админом\n\n"
-        "Все категории поддерживают выбор версии **от - до**\n"
         "Используй кнопки ниже:",
-        parse_mode="Markdown",
         reply_markup=get_main_keyboard(is_admin)
     )
 
+# ========== КЛИЕНТЫ ==========
+@dp.message(F.text == "🎮 Клиенты")
+async def clients_menu(message: Message):
+    versions = get_all_client_versions()
+    if not versions:
+        await message.answer("📭 Пока нет клиентов")
+        return
+    
+    await message.answer(
+        "🎮 Выбери версию Minecraft:",
+        reply_markup=get_version_keyboard(versions, "clients")
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("ver_clients_"))
+async def clients_version_selected(callback: CallbackQuery, state: FSMContext):
+    version = callback.data.replace("ver_clients_", "")
+    items, total = get_clients_by_version(version, 1)
+    
+    if not items:
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет клиентов")
+        await callback.answer()
+        return
+    
+    total_pages = (total + 9) // 10
+    await state.update_data(client_version=version, client_page=1)
+    await callback.message.edit_text(
+        f"🎮 Клиенты для версии {version} (стр 1/{total_pages}):",
+        reply_markup=get_items_keyboard(items, "clients", 1, total_pages)
+    )
+    await callback.answer()
+
+# ========== РЕСУРСПАКИ ==========
+@dp.message(F.text == "🎨 Ресурспаки")
+async def packs_menu(message: Message):
+    versions = get_all_pack_versions()
+    if not versions:
+        await message.answer("📭 Пока нет ресурспаков")
+        return
+    
+    await message.answer(
+        "🎨 Выбери версию Minecraft:",
+        reply_markup=get_version_keyboard(versions, "packs")
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("ver_packs_"))
+async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
+    version = callback.data.replace("ver_packs_", "")
+    items, total = get_packs_by_version(version, 1)
+    
+    if not items:
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет ресурспаков")
+        await callback.answer()
+        return
+    
+    total_pages = (total + 9) // 10
+    await state.update_data(pack_version=version, pack_page=1)
+    await callback.message.edit_text(
+        f"🎨 Ресурспаки для версии {version} (стр 1/{total_pages}):",
+        reply_markup=get_items_keyboard(items, "packs", 1, total_pages)
+    )
+    await callback.answer()
+
+# ========== КОНФИГИ ==========
+@dp.message(F.text == "⚙️ Конфиги")
+async def configs_menu(message: Message):
+    versions = get_all_config_versions()
+    if not versions:
+        await message.answer("📭 Пока нет конфигов")
+        return
+    
+    await message.answer(
+        "⚙️ Выбери версию Minecraft:",
+        reply_markup=get_version_keyboard(versions, "configs")
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("ver_configs_"))
+async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
+    version = callback.data.replace("ver_configs_", "")
+    items, total = get_configs_by_version(version, 1)
+    
+    if not items:
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет конфигов")
+        await callback.answer()
+        return
+    
+    total_pages = (total + 9) // 10
+    await state.update_data(config_version=version, config_page=1)
+    await callback.message.edit_text(
+        f"⚙️ Конфиги для версии {version} (стр 1/{total_pages}):",
+        reply_markup=get_items_keyboard(items, "configs", 1, total_pages)
+    )
+    await callback.answer()
+
+# ========== ПАГИНАЦИЯ ==========
+@dp.callback_query(lambda c: c.data.startswith("page_"))
+async def pagination(callback: CallbackQuery, state: FSMContext):
+    _, category, page = callback.data.split("_")
+    page = int(page)
+    data = await state.get_data()
+    
+    if category == "clients":
+        version = data.get("client_version", "1.20")
+        items, total = get_clients_by_version(version, page)
+        title = f"🎮 Клиенты для версии {version}"
+    elif category == "packs":
+        version = data.get("pack_version", "1.20")
+        items, total = get_packs_by_version(version, page)
+        title = f"🎨 Ресурспаки для версии {version}"
+    else:
+        version = data.get("config_version", "1.20")
+        items, total = get_configs_by_version(version, page)
+        title = f"⚙️ Конфиги для версии {version}"
+    
+    total_pages = (total + 9) // 10
+    await state.update_data({f"{category}_page": page})
+    await callback.message.edit_text(
+        f"{title} (стр {page}/{total_pages}):",
+        reply_markup=get_items_keyboard(items, category, page, total_pages)
+    )
+    await callback.answer()
+
+# ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
+@dp.callback_query(lambda c: c.data.startswith("view_"))
+async def view_item(callback: CallbackQuery, state: FSMContext):
+    _, category, item_id = callback.data.split("_")
+    item_id = int(item_id)
+    
+    item = get_item(category, item_id)
+    if not item:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+    
+    increment_view(category, item_id)
+    
+    if category == "clients":
+        media_list = json.loads(item[4]) if item[4] else []
+        version_text = get_version_display(item[6], item[7])
+        text = (f"Название: {item[1]}\n\n"
+                f"{item[3]}\n\n"
+                f"{version_text}\n"
+                f"Скачиваний: {format_number(item[8])}\n"
+                f"Просмотров: {format_number(item[9])}")
+    elif category == "packs":
+        media_list = json.loads(item[4]) if item[4] else []
+        version_text = get_version_display(item[6], item[7])
+        
+        # Проверяем избранное
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', 
+                   (callback.from_user.id, item_id))
+        is_fav = cur.fetchone() is not None
+        conn.close()
+        
+        text = (f"Название: {item[1]}\n\n"
+                f"{item[3]}\n\n"
+                f"Автор: {item[8]}\n"
+                f"{version_text}\n"
+                f"Скачиваний: {format_number(item[9])}\n"
+                f"В избранном: {format_number(item[10])}\n"
+                f"Просмотров: {format_number(item[11])}")
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_item_detail_keyboard(category, item_id, is_fav)
+        )
+        await callback.answer()
+        return
+    else:
+        media_list = json.loads(item[4]) if item[4] else []
+        version_text = get_version_display(item[6], item[7])
+        text = (f"Название: {item[1]}\n\n"
+                f"{item[3]}\n\n"
+                f"{version_text}\n"
+                f"Скачиваний: {format_number(item[8])}\n"
+                f"Просмотров: {format_number(item[9])}")
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_item_detail_keyboard(category, item_id)
+    )
+    await callback.answer()
+
+# ========== НАВИГАЦИЯ НАЗАД ==========
+@dp.callback_query(lambda c: c.data.startswith("back_"))
+async def back_to_list(callback: CallbackQuery, state: FSMContext):
+    category = callback.data.replace("back_", "")
+    data = await state.get_data()
+    
+    if category == "clients":
+        version = data.get("client_version", "1.20")
+        page = data.get("client_page", 1)
+        items, total = get_clients_by_version(version, page)
+        title = f"🎮 Клиенты для версии {version}"
+    elif category == "packs":
+        version = data.get("pack_version", "1.20")
+        page = data.get("pack_page", 1)
+        items, total = get_packs_by_version(version, page)
+        title = f"🎨 Ресурспаки для версии {version}"
+    else:
+        version = data.get("config_version", "1.20")
+        page = data.get("config_page", 1)
+        items, total = get_configs_by_version(version, page)
+        title = f"⚙️ Конфиги для версии {version}"
+    
+    total_pages = (total + 9) // 10
+    await callback.message.edit_text(
+        f"{title} (стр {page}/{total_pages}):",
+        reply_markup=get_items_keyboard(items, category, page, total_pages)
+    )
+    await callback.answer()
+
+# ========== СКАЧИВАНИЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("download_"))
+async def download_item(callback: CallbackQuery):
+    _, category, item_id = callback.data.split("_")
+    item_id = int(item_id)
+    item = get_item(category, item_id)
+    
+    if not item:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+    
+    increment_download(category, item_id)
+    backup_db(f"download_{category}_{item_id}")
+    
+    url = item[5]  # download_url
+    name = item[1]
+    
+    await callback.message.answer(
+        f"Скачать {name}:\n{url}"
+    )
+    await callback.answer("✅ Ссылка отправлена!")
+
+# ========== ИЗБРАННОЕ ==========
+@dp.message(F.text == "❤️ Избранное")
+async def show_favorites(message: Message):
+    favs = get_favorites(message.from_user.id)
+    
+    if not favs:
+        await message.answer(
+            "❤️ Избранное пусто\n\n"
+            "Добавляй ресурспаки в избранное кнопкой 🤍"
+        )
+        return
+    
+    text = "❤️ Твоё избранное:\n\n"
+    for fav in favs[:10]:
+        media_list = json.loads(fav[3]) if fav[3] else []
+        preview = "🖼️" if media_list else "📄"
+        text += f"{preview} {fav[1]} - {format_number(fav[4])} 📥\n"
+    
+    if len(favs) > 10:
+        text += f"\n...и еще {len(favs) - 10}"
+    
+    await message.answer(text)
+
+@dp.callback_query(lambda c: c.data.startswith("fav_"))
+async def favorite_handler(callback: CallbackQuery):
+    _, category, item_id = callback.data.split("_")
+    item_id = int(item_id)
+    
+    if category != "packs":
+        await callback.answer("❌ Только для ресурспаков", show_alert=True)
+        return
+    
+    added = toggle_favorite(callback.from_user.id, item_id)
+    
+    if added:
+        await callback.answer("❤️ Добавлено в избранное!")
+    else:
+        await callback.answer("💔 Удалено из избранного")
+    
+    # Обновляем отображение
+    await view_item(callback, None)
+
+# ========== ПОИСК ==========
+@dp.message(F.text == "🔍 Поиск")
+async def search_start(message: Message, state: FSMContext):
+    await state.set_state(SearchStates.choosing_category)
+    await message.answer(
+        "🔍 В какой категории искать?",
+        reply_markup=get_search_category_keyboard()
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("search_") and c.data not in ["search_clients", "search_packs", "search_configs"])
+async def search_category_selected(callback: CallbackQuery, state: FSMContext):
+    category = callback.data.replace("search_", "")
+    await state.update_data(search_category=category)
+    await state.set_state(SearchStates.waiting_for_query)
+    await callback.message.edit_text(f"🔍 Введи поисковый запрос:")
+    await callback.answer()
+
+@dp.message(SearchStates.waiting_for_query)
+async def search_execute(message: Message, state: FSMContext):
+    # Здесь нужно реализовать поиск
+    await message.answer("⚠️ Поиск временно недоступен")
+    await state.clear()
+
+# ========== ИНФО ==========
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: Message):
-    """Информация о боте и создателе"""
     is_admin = (message.from_user.id == ADMIN_ID)
     
-    # Подсчёт статистики
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -819,53 +948,43 @@ async def info(message: Message):
         conn.close()
         
         total_downloads = clients_d + packs_d + configs_d
+        
+        await message.answer(
+            f"Информация о боте\n\n"
+            f"Создатель: {CREATOR_USERNAME}\n"
+            f"Версия: 5.1\n\n"
+            f"Статистика:\n"
+            f"• Клиентов: {clients}\n"
+            f"• Ресурспаков: {packs}\n"
+            f"• Конфигов: {configs}\n"
+            f"• Всего скачиваний: {format_number(total_downloads)}"
+        )
     except:
-        clients = packs = configs = 0
-        total_downloads = 0
-    
-    await message.answer(
-        f"ℹ️ **Информация о боте**\n\n"
-        f"**Создатель:** {CREATOR_USERNAME}\n"
-        f"**Версия:** 5.0\n\n"
-        f"📊 **Статистика:**\n"
-        f"• Клиентов: {clients}\n"
-        f"• Ресурспаков: {packs}\n"
-        f"• Конфигов: {configs}\n"
-        f"• Всего скачиваний: {format_number(total_downloads)}\n\n"
-        f"📦 Автоматические бэкапы при каждом добавлении\n"
-        f"🔍 Полнотекстовый поиск по всем категориям\n"
-        f"❤️ Избранное для ресурспаков\n"
-        f"📌 Поддержка версий **от - до** во всех категориях",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard(is_admin)
-    )
+        await message.answer(
+            f"Информация о боте\n\n"
+            f"Создатель: {CREATOR_USERNAME}\n"
+            f"Версия: 5.1"
+        )
 
+# ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
-    """Раздел помощи"""
     await message.answer(
-        "❓ **Помощь и поддержка**\n\n"
-        "Если у тебя возникли вопросы, проблемы или предложения:\n\n"
+        "Помощь и поддержка\n\n"
+        "Если у тебя возникли вопросы или проблемы:\n\n"
         "• Нажми кнопку ниже, чтобы связаться с создателем\n"
-        "• Опиши свою проблему подробно\n"
-        "• Мы постараемся ответить как можно скорее\n\n"
-        "Также ты можешь посмотреть частые вопросы:",
-        parse_mode="Markdown",
+        "• Опиши свою проблему подробно",
         reply_markup=get_help_keyboard()
     )
 
 @dp.callback_query(lambda c: c.data == "help_rules")
 async def help_rules(callback: CallbackQuery):
-    """Правила использования"""
     await callback.message.edit_text(
-        "📋 **Правила использования**\n\n"
+        "Правила использования\n\n"
         "1. Все файлы предоставляются 'как есть'\n"
         "2. Автор не несёт ответственности за использование файлов\n"
         "3. Запрещено выкладывать файлы на других ресурсах без указания автора\n"
-        "4. Уважайте других пользователей\n"
-        "5. При обнаружении проблем сообщайте админу\n\n"
-        "Нарушение правил может привести к блокировке.",
-        parse_mode="Markdown",
+        "4. Уважайте других пользователей",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]
         ])
@@ -874,22 +993,16 @@ async def help_rules(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "help_faq")
 async def help_faq(callback: CallbackQuery):
-    """Частые вопросы"""
     await callback.message.edit_text(
-        "❓ **Часто задаваемые вопросы**\n\n"
-        "**Q: Как скачать файл?**\n"
+        "Часто задаваемые вопросы\n\n"
+        "Q: Как скачать файл?\n"
         "A: Нажми на элемент, затем кнопку 'Скачать'\n\n"
-        "**Q: Почему не работает ссылка?**\n"
+        "Q: Почему не работает ссылка?\n"
         "A: Возможно, файл был удалён. Сообщи админу\n\n"
-        "**Q: Как добавить в избранное?**\n"
-        "A: В разделе ресурспаков нажми '🤍 В избранное'\n\n"
-        "**Q: Как найти нужный клиент?**\n"
-        "A: Используй кнопку 'Поиск' в главном меню\n\n"
-        "**Q: Что значит версии от - до?**\n"
-        "A: Мод может работать на нескольких версиях, например с 1.8 по 1.12\n\n"
-        "**Q: Бот не отвечает, что делать?**\n"
-        "A: Напиши админу через кнопку 'Связаться'",
-        parse_mode="Markdown",
+        "Q: Как добавить в избранное?\n"
+        "A: В разделе ресурспаков нажми 🤍\n\n"
+        "Q: Что значит версии от - до?\n"
+        "A: Мод может работать на нескольких версиях",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]
         ])
@@ -898,519 +1011,135 @@ async def help_faq(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "back_to_help")
 async def back_to_help(callback: CallbackQuery):
-    """Назад в меню помощи"""
     await callback.message.edit_text(
-        "❓ **Помощь и поддержка**\n\n"
-        "Если у тебя возникли вопросы, проблемы или предложения:\n\n"
+        "Помощь и поддержка\n\n"
+        "Если у тебя возникли вопросы или проблемы:\n\n"
         "• Нажми кнопку ниже, чтобы связаться с создателем\n"
-        "• Опиши свою проблему подробно\n"
-        "• Мы постараемся ответить как можно скорее\n\n"
-        "Также ты можешь посмотреть частые вопросы:",
-        parse_mode="Markdown",
+        "• Опиши свою проблему подробно",
         reply_markup=get_help_keyboard()
     )
     await callback.answer()
 
-# ========== ПОИСК ==========
-@dp.message(F.text == "🔍 Поиск")
-async def search_start(message: Message, state: FSMContext):
-    """Начало поиска - выбор категории"""
-    await state.set_state(SearchStates.choosing_category)
+# ========== АДМИН ПАНЕЛЬ ==========
+@dp.message(F.text == "⚙️ Админ панель")
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У тебя нет прав администратора.")
+        return
+    
     await message.answer(
-        "🔍 **В какой категории искать?**",
-        parse_mode="Markdown",
-        reply_markup=get_search_category_keyboard()
+        "⚙️ Админ панель\n\nВыбери категорию:",
+        reply_markup=get_admin_main_keyboard()
     )
 
-@dp.callback_query(lambda c: c.data.startswith("search_") and c.data not in ["search_clients", "search_packs", "search_configs"])
-async def search_category_selected(callback: CallbackQuery, state: FSMContext):
-    """Выбрана категория для поиска"""
-    category = callback.data.replace("search_", "")
-    await state.update_data(search_category=category)
-    await state.set_state(SearchStates.waiting_for_query)
+@dp.callback_query(lambda c: c.data == "admin_back")
+async def admin_back(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "⚙️ Админ панель\n\nВыбери категорию:",
+        reply_markup=get_admin_main_keyboard()
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data in ["admin_clients", "admin_packs", "admin_configs"])
+async def admin_category(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
     
-    category_names = {
-        'clients': '🎮 Клиенты',
-        'packs': '🎨 Ресурспаки',
-        'configs': '⚙️ Конфиги'
+    category_map = {
+        "admin_clients": ("🎮 Клиенты", "clients"),
+        "admin_packs": ("🎨 Ресурспаки", "packs"),
+        "admin_configs": ("⚙️ Конфиги", "configs")
     }
+    title, cat = category_map[callback.data]
+    await callback.message.edit_text(
+        f"{title}\n\nВыбери действие:",
+        reply_markup=get_admin_category_keyboard(cat)
+    )
+    await callback.answer()
+
+# ========== БЭКАПЫ ==========
+@dp.callback_query(lambda c: c.data == "admin_backups")
+async def admin_backups(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    backup_path = backup_db("manual")
+    
+    text = "📦 Управление бэкапами\n\n"
+    if backup_path:
+        text += "✅ Новый бэкап создан!\n\n"
+    text += "Последние бэкапы:"
     
     await callback.message.edit_text(
-        f"{category_names[category]}\n\n"
-        f"🔍 Введи **поисковый запрос**:\n"
-        f"(можно искать по названию, описанию или автору)",
-        parse_mode="Markdown"
+        text,
+        reply_markup=get_backups_keyboard()
     )
     await callback.answer()
 
-@dp.message(SearchStates.waiting_for_query)
-async def search_execute(message: Message, state: FSMContext):
-    """Выполнение поиска"""
-    data = await state.get_data()
-    category = data.get('search_category')
-    query = message.text.strip()
-    
-    if len(query) < 2:
-        await message.answer("❌ Слишком короткий запрос. Минимум 2 символа.")
-        return
-    
-    await state.update_data(search_query=query, search_page=1)
-    await show_search_results(message, state, category, query, 1)
-
-async def show_search_results(message: Message, state: FSMContext, category: str, query: str, page: int):
-    """Показать результаты поиска"""
-    
-    if category == 'clients':
-        items, total = search_clients(query, page)
-        title = "🎮 Клиенты"
-    elif category == 'packs':
-        items, total = search_packs(query, page)
-        title = "🎨 Ресурспаки"
-    else:  # configs
-        items, total = search_configs(query, page)
-        title = "⚙️ Конфиги"
-    
-    if not items:
-        await message.answer(
-            f"❌ По запросу **{query}** ничего не найдено",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Новый поиск", callback_data="back_to_search")]
-            ])
-        )
-        return
-    
-    total_pages = (total + 9) // 10
-    text = f"🔍 **Результаты поиска**\n"
-    text += f"Категория: {title}\n"
-    text += f"Запрос: '{query}'\n"
-    text += f"Найдено: {total}\n\n"
-    
-    keyboard = get_items_page_keyboard(items, category, page, total_pages, query)
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-
-@dp.callback_query(lambda c: c.data.startswith("search_page_"))
-async def search_pagination(callback: CallbackQuery, state: FSMContext):
-    """Пагинация в результатах поиска"""
-    _, _, category, query, page = callback.data.split("_", 4)
-    page = int(page)
-    
-    await state.update_data(search_page=page)
-    await show_search_results(callback.message, state, category, query, page)
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "back_to_search")
-async def back_to_search(callback: CallbackQuery, state: FSMContext):
-    """Назад к началу поиска"""
-    await state.set_state(SearchStates.choosing_category)
-    await callback.message.edit_text(
-        "🔍 **В какой категории искать?**",
-        parse_mode="Markdown",
-        reply_markup=get_search_category_keyboard()
-    )
-    await callback.answer()
-
-# ========== КЛИЕНТЫ ==========
-@dp.message(F.text == "🎮 Клиенты")
-async def clients_menu(message: Message, state: FSMContext):
-    """Меню выбора версии для клиентов"""
-    await state.update_data(client_category='clients')
-    await message.answer(
-        "🎮 **Выбери версию Minecraft:**\n\n"
-        "Будут показаны клиенты, которые работают на этой версии",
-        parse_mode="Markdown",
-        reply_markup=get_version_selection_keyboard('clients')
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("ver_clients_"))
-async def clients_version_selected(callback: CallbackQuery, state: FSMContext):
-    """Выбрана версия для клиентов"""
-    version = callback.data.replace("ver_clients_", "")
-    await state.update_data(client_version=version, client_page=1)
-    await show_clients_page(callback.message, state, version, 1)
-    await callback.answer()
-
-async def show_clients_page(message: Message, state: FSMContext, version: str, page: int):
-    """Показать страницу клиентов"""
-    items, total = get_clients_by_version(version, page)
-    if not items:
-        await message.answer(f"❌ Для версии {version} пока нет клиентов")
-        return
-    
-    total_pages = (total + 9) // 10
-    keyboard = get_items_page_keyboard(items, "clients", page, total_pages)
-    
-    text = f"🎮 **Клиенты для версии {version}** (страница {page}/{total_pages})\n\n"
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-
-# ========== РЕСУРСПАКИ ==========
-@dp.message(F.text == "🎨 Ресурспаки")
-async def packs_menu(message: Message, state: FSMContext):
-    """Меню выбора версии для ресурспаков"""
-    await state.update_data(pack_category='packs')
-    await message.answer(
-        "🎨 **Выбери версию Minecraft:**\n\n"
-        "Будут показаны ресурспаки, которые работают на этой версии",
-        parse_mode="Markdown",
-        reply_markup=get_version_selection_keyboard('packs')
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("ver_packs_"))
-async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
-    """Выбрана версия для ресурспаков"""
-    version = callback.data.replace("ver_packs_", "")
-    await state.update_data(pack_version=version, pack_page=1)
-    await show_packs_page(callback.message, state, version, 1)
-    await callback.answer()
-
-async def show_packs_page(message: Message, state: FSMContext, version: str, page: int):
-    """Показать страницу ресурспаков"""
-    items, total = get_packs_by_version(version, page)
-    if not items:
-        await message.answer(f"❌ Для версии {version} пока нет ресурспаков")
-        return
-    
-    total_pages = (total + 9) // 10
-    keyboard = get_items_page_keyboard(items, "packs", page, total_pages)
-    
-    text = f"🎨 **Ресурспаки для версии {version}** (страница {page}/{total_pages})\n\n"
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-
-# ========== КОНФИГИ ==========
-@dp.message(F.text == "⚙️ Конфиги")
-async def configs_menu(message: Message, state: FSMContext):
-    """Меню выбора версии для конфигов"""
-    await state.update_data(config_category='configs')
-    await message.answer(
-        "⚙️ **Выбери версию Minecraft:**\n\n"
-        "Будут показаны конфиги, которые работают на этой версии",
-        parse_mode="Markdown",
-        reply_markup=get_version_selection_keyboard('configs')
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("ver_configs_"))
-async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
-    """Выбрана версия для конфигов"""
-    version = callback.data.replace("ver_configs_", "")
-    await state.update_data(config_version=version, config_page=1)
-    await show_configs_page(callback.message, state, version, 1)
-    await callback.answer()
-
-async def show_configs_page(message: Message, state: FSMContext, version: str, page: int):
-    """Показать страницу конфигов"""
-    items, total = get_configs_by_version(version, page)
-    if not items:
-        await message.answer(f"❌ Для версии {version} пока нет конфигов")
-        return
-    
-    total_pages = (total + 9) // 10
-    keyboard = get_items_page_keyboard(items, "configs", page, total_pages)
-    
-    text = f"⚙️ **Конфиги для версии {version}** (страница {page}/{total_pages})\n\n"
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-
-# ========== ИЗБРАННОЕ ==========
-@dp.message(F.text == "❤️ Избранное")
-async def show_favorites(message: Message):
-    """Показать избранное пользователя"""
-    favs = get_favorites(message.from_user.id)
-    
-    if not favs:
-        await message.answer(
-            "❤️ **Избранное пусто**\n\n"
-            "Добавляй ресурспаки в избранное кнопкой '🤍 В избранное'",
-            parse_mode="Markdown"
-        )
-        return
-    
-    text = "❤️ **Твоё избранное:**\n\n"
-    for fav in favs[:10]:
-        media_list = json.loads(fav[3]) if fav[3] else []
-        preview = "🖼️" if media_list else "📄"
-        text += f"{preview} {fav[1]} - {format_number(fav[4])} 📥\n"
-    
-    if len(favs) > 10:
-        text += f"\n...и еще {len(favs) - 10}"
-    
-    await message.answer(text, parse_mode="Markdown")
-
-# ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
-@dp.callback_query(lambda c: c.data.startswith("view_"))
-async def view_item(callback: CallbackQuery):
-    """Просмотр детальной информации об элементе"""
-    _, category, item_id = callback.data.split("_")
-    item_id = int(item_id)
-    
-    item = get_item(category, item_id)
-    if not item:
-        await callback.answer("❌ Не найден", show_alert=True)
-        return
-    
-    increment_view(category, item_id)
-    
-    if category == "clients":
-        # clients: id, name, short_desc, full_desc, media, download_url, min_version, max_version, downloads, views
-        media_list = json.loads(item[4]) if item[4] else []
-        version_display = get_version_range_display(item[6], item[7])
-        text = (
-            f"**{item[1]}**\n\n"
-            f"{item[3]}\n\n"
-            f"*{version_display}*\n"
-            f"📥 Скачиваний: {format_number(item[8])}\n"
-            f"👁 Просмотров: {format_number(item[9])}"
-        )
-    elif category == "packs":
-        # packs: id, name, short_desc, full_desc, media, download_url, min_version, max_version, author, downloads, likes, views
-        media_list = json.loads(item[4]) if item[4] else []
-        version_display = get_version_range_display(item[6], item[7])
-        text = (
-            f"**{item[1]}**\n\n"
-            f"{item[3]}\n\n"
-            f"*Автор:* {item[8]}\n"
-            f"*{version_display}*\n"
-            f"📥 Скачиваний: {format_number(item[9])}\n"
-            f"👁 Просмотров: {format_number(item[11])}"
-        )
-    else:  # configs
-        # configs: id, name, short_desc, full_desc, media, download_url, min_version, max_version, downloads, views
-        media_list = json.loads(item[4]) if item[4] else []
-        version_display = get_version_range_display(item[6], item[7])
-        text = (
-            f"**{item[1]}**\n\n"
-            f"{item[3]}\n\n"
-            f"*{version_display}*\n"
-            f"📥 Скачиваний: {format_number(item[8])}\n"
-            f"👁 Просмотров: {format_number(item[9])}"
-        )
-    
-    # Для ресурспаков добавляем кнопку избранного
-    if category == "packs":
-        # Проверяем, в избранном ли
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', 
-                   (callback.from_user.id, item_id))
-        is_fav = cur.fetchone() is not None
-        conn.close()
-        
-        buttons = [
-            [
-                InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}"),
-                InlineKeyboardButton(text="❤️" if is_fav else "🤍", callback_data=f"fav_{category}_{item_id}")
-            ],
-            [InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"media_{category}_{item_id}")],
-            [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"back_to_list_{category}")]
-        ]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    else:
-        keyboard = get_item_detail_keyboard(category, item_id)
-    
-    if media_list and media_list[0]['type'] == 'photo':
-        await callback.message.answer_photo(
-            photo=media_list[0]['id'],
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-    else:
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-    
-    await callback.message.delete()
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("fav_"))
-async def toggle_favorite_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработка избранного"""
-    _, category, item_id = callback.data.split("_")
-    item_id = int(item_id)
-    
-    if category != "packs":
-        await callback.answer("❌ Только для ресурспаков", show_alert=True)
-        return
-    
-    added = toggle_favorite(callback.from_user.id, item_id)
-    
-    if added:
-        await callback.answer("❤️ Добавлено в избранное!")
-    else:
-        await callback.answer("💔 Удалено из избранного")
-    
-    # Обновляем отображение
-    await view_item(callback)
-
-# ========== НАВИГАЦИЯ ==========
-@dp.callback_query(lambda c: c.data.startswith("page_"))
-async def handle_pagination(callback: CallbackQuery, state: FSMContext):
-    """Обработка пагинации"""
-    _, category, page = callback.data.split("_")
-    page = int(page)
-    
-    data = await state.get_data()
-    
-    if category == "clients":
-        version = data.get("client_version", "1.20")
-        await show_clients_page(callback.message, state, version, page)
-    elif category == "packs":
-        version = data.get("pack_version", "1.20")
-        await show_packs_page(callback.message, state, version, page)
-    elif category == "configs":
-        version = data.get("config_version", "1.20")
-        await show_configs_page(callback.message, state, version, page)
-    
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("back_to_list_"))
-async def back_to_list(callback: CallbackQuery, state: FSMContext):
-    """Назад к списку"""
-    category = callback.data.replace("back_to_list_", "")
-    data = await state.get_data()
-    
-    if category == "clients":
-        version = data.get("client_version", "1.20")
-        page = data.get("client_page", 1)
-        await show_clients_page(callback.message, state, version, page)
-    elif category == "packs":
-        version = data.get("pack_version", "1.20")
-        page = data.get("pack_page", 1)
-        await show_packs_page(callback.message, state, version, page)
-    elif category == "configs":
-        version = data.get("config_version", "1.20")
-        page = data.get("config_page", 1)
-        await show_configs_page(callback.message, state, version, page)
-    
-    await callback.message.delete()
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("download_"))
-async def download_item(callback: CallbackQuery):
-    """Скачивание элемента"""
-    _, category, item_id = callback.data.split("_")
-    item_id = int(item_id)
-    item = get_item(category, item_id)
-    
-    if not item:
-        await callback.answer("❌ Не найден", show_alert=True)
-        return
-    
-    increment_download(category, item_id)
-    backup_db(f"download_{category}_{item_id}")
-    
-    # URL в зависимости от категории
-    if category == "packs":
-        url = item[5]
-        name = item[1]
-    elif category == "clients":
-        url = item[5]
-        name = item[1]
-    else:  # configs
-        url = item[5]
-        name = item[1]
-    
-    await callback.message.answer(
-        f"📥 **Скачать {name}**\n\n[Нажми для скачивания]({url})",
-        parse_mode="Markdown"
-    )
-    await callback.answer("✅ Ссылка отправлена!")
-
-@dp.callback_query(lambda c: c.data.startswith("media_"))
-async def view_media(callback: CallbackQuery, state: FSMContext):
-    """Просмотр медиа"""
-    _, category, item_id = callback.data.split("_")
-    item_id = int(item_id)
-    item = get_item(category, item_id)
-    
-    if not item:
-        await callback.answer("❌ Не найден", show_alert=True)
+# ========== СТАТИСТИКА ==========
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
     try:
-        media_list = json.loads(item[4]) if item[4] else []
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM clients')
+        clients = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM resourcepacks')
+        packs = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM configs')
+        configs = cur.fetchone()[0]
+        
+        cur.execute('SELECT SUM(downloads) FROM clients')
+        clients_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM resourcepacks')
+        packs_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM configs')
+        configs_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT COUNT(*) FROM favorites')
+        favorites = cur.fetchone()[0]
+        
+        conn.close()
+        
+        backup_count = len(os.listdir(BACKUP_DIR)) if os.path.exists(BACKUP_DIR) else 0
+        backup_size = sum(os.path.getsize(os.path.join(BACKUP_DIR, f)) for f in os.listdir(BACKUP_DIR)) // 1024 if backup_count > 0 else 0
+        
+        text = (f"Статистика\n\n"
+                f"Клиенты: {clients}\n"
+                f"Ресурспаки: {packs}\n"
+                f"Конфиги: {configs}\n"
+                f"В избранном: {favorites}\n"
+                f"Всего скачиваний: {format_number(clients_d + packs_d + configs_d)}\n\n"
+                f"Бэкапов: {backup_count} ({backup_size} KB)")
     except:
-        media_list = []
+        text = "Статистика\n\nОшибка получения данных"
     
-    if not media_list:
-        await callback.answer("📭 Нет медиа", show_alert=True)
-        return
-    
-    await state.update_data(
-        media_list=media_list,
-        media_index=0,
-        media_category=category,
-        media_item_id=item_id
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+        ])
     )
-    await show_media(callback.message, state, 0)
     await callback.answer()
 
-async def show_media(message: Message, state: FSMContext, index: int):
-    """Показать медиа"""
-    data = await state.get_data()
-    media_list = data['media_list']
-    
-    if index >= len(media_list):
-        index = 0
-    
-    media = media_list[index]
-    
-    buttons = [
-        [
-            InlineKeyboardButton(text="◀️", callback_data=f"media_nav_{index-1}" if index > 0 else "noop"),
-            InlineKeyboardButton(text=f"{index+1}/{len(media_list)}", callback_data="noop"),
-            InlineKeyboardButton(text="▶️", callback_data=f"media_nav_{index+1}" if index < len(media_list)-1 else "noop")
-        ],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="media_back")]
-    ]
-    
-    await state.update_data(media_index=index)
-    
-    if media['type'] == 'photo':
-        await message.answer_photo(
-            photo=media['id'],
-            caption=f"📸 Медиа {index+1} из {len(media_list)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
-    elif media['type'] == 'video':
-        await message.answer_video(
-            video=media['id'],
-            caption=f"🎬 Видео {index+1} из {len(media_list)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
-    elif media['type'] == 'animation':
-        await message.answer_animation(
-            animation=media['id'],
-            caption=f"🎞️ GIF {index+1} из {len(media_list)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
-
-@dp.callback_query(lambda c: c.data.startswith("media_nav_"))
-async def media_navigation(callback: CallbackQuery, state: FSMContext):
-    """Навигация по медиа"""
-    index = int(callback.data.replace("media_nav_", ""))
-    await show_media(callback.message, state, index)
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "media_back")
-async def media_back(callback: CallbackQuery, state: FSMContext):
-    """Назад из медиа"""
-    data = await state.get_data()
-    category = data.get('media_category')
-    item_id = data.get('media_item_id')
-    
-    await state.clear()
-    
-    # Показываем детальную информацию
-    # Создаём новый callback
-    callback.data = f"view_{category}_{item_id}"
-    await view_item(callback)
-    await callback.answer()
-
+# ========== ЗАГЛУШКИ ==========
 @dp.callback_query(lambda c: c.data == "noop")
 async def noop(callback: CallbackQuery):
-    """Заглушка для неактивных кнопок"""
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
-    """Назад в главное меню"""
     await state.clear()
     await callback.message.delete()
     is_admin = (callback.from_user.id == ADMIN_ID)
@@ -1420,23 +1149,12 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== АДМИН ПАНЕЛЬ (здесь должен быть весь код админки) ==========
-# Для краткости я не копирую весь код админки, но он должен быть здесь
-# Весь код админ-панели из предыдущей версии (начиная с @dp.message(F.text == "⚙️ Админ панель") и до конца)
-# С изменениями под новые поля min_version и max_version
-
 # ========== ЗАПУСК ==========
 async def main():
     print("="*50)
     print("✅ Бот запущен!")
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👤 Создатель: {CREATOR_USERNAME}")
-    print(f"📦 Папка для бэкапов: {BACKUP_DIR}")
-    print("="*50)
-    print("📌 Новые функции:")
-    print("   • Компактная клавиатура в 2-3 ряда")
-    print("   • Поддержка версий ОТ - ДО для всех категорий")
-    print("   • Улучшенный просмотр деталей")
     print("="*50)
     await dp.start_polling(bot)
 
