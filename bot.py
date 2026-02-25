@@ -16,7 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '5809098591'))
+ADMIN_ID = 5809098591  # Твой ID
 
 if not BOT_TOKEN:
     raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
@@ -33,8 +33,6 @@ DB_PATH = 'clients.db'
 
 def init_db():
     """Создание базы данных"""
-    global DB_PATH
-    
     if os.path.exists(DB_PATH):
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -121,15 +119,7 @@ except Exception as e:
         os.remove(DB_PATH)
     init_db()
 
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-def format_number(num: int) -> str:
-    if num < 1000:
-        return str(num)
-    elif num < 1000000:
-        return f"{num/1000:.1f}K"
-    else:
-        return f"{num/1000000:.1f}M"
-
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 def safe_db(func):
     def wrapper(*args, **kwargs):
         try:
@@ -139,7 +129,6 @@ def safe_db(func):
             return None
     return wrapper
 
-# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 @safe_db
 def get_item(table: str, item_id: int):
     conn = sqlite3.connect(DB_PATH)
@@ -166,21 +155,65 @@ def delete_item(table: str, item_id: int):
     conn.commit()
     conn.close()
 
-# Клиенты
-@safe_db
+# ========== ИСПРАВЛЕННЫЕ ФУНКЦИИ ДОБАВЛЕНИЯ ==========
 def add_client(name: str, desc: str, full: str, url: str, version: str, media: List[Dict] = None):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO clients (name, description, full_description, download_url, version, media)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, version, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
+    """Добавить клиента и вернуть ID"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO clients (name, description, full_description, download_url, version, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, version, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        logger.info(f"✅ Клиент добавлен с ID: {item_id}")
+        return item_id
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении клиента: {e}")
+        return None
 
+def add_pack(name: str, desc: str, full: str, url: str, min_v: str, max_v: str, author: str, media: List[Dict] = None):
+    """Добавить ресурспак и вернуть ID"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO resourcepacks (name, description, full_description, download_url, min_version, max_version, author, media)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, min_v, max_v, author, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        logger.info(f"✅ Ресурспак добавлен с ID: {item_id}")
+        return item_id
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении ресурспака: {e}")
+        return None
+
+def add_config(name: str, desc: str, full: str, url: str, version: str, media: List[Dict] = None):
+    """Добавить конфиг и вернуть ID"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO configs (name, description, full_description, download_url, game_version, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, version, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        logger.info(f"✅ Конфиг добавлен с ID: {item_id}")
+        return item_id
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении конфига: {e}")
+        return None
+
+# Функции обновления
 @safe_db
 def update_client(item_id: int, field: str, value: str):
     conn = sqlite3.connect(DB_PATH)
@@ -189,6 +222,23 @@ def update_client(item_id: int, field: str, value: str):
     conn.commit()
     conn.close()
 
+@safe_db
+def update_pack(item_id: int, field: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
+    conn.commit()
+    conn.close()
+
+@safe_db
+def update_config(item_id: int, field: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
+    conn.commit()
+    conn.close()
+
+# Функции получения данных
 @safe_db
 def get_clients_by_version(version: str = 'all'):
     conn = sqlite3.connect(DB_PATH)
@@ -209,29 +259,6 @@ def get_client_versions():
     versions = [v[0] for v in cur.fetchall()]
     conn.close()
     return versions
-
-# Ресурспаки
-@safe_db
-def add_pack(name: str, desc: str, full: str, url: str, min_v: str, max_v: str, author: str, media: List[Dict] = None):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO resourcepacks (name, description, full_description, download_url, min_version, max_version, author, media)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, min_v, max_v, author, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
-
-@safe_db
-def update_pack(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
 
 @safe_db
 def get_packs_by_version(version: str, sort: str = 'popular'):
@@ -304,29 +331,6 @@ def get_favorites(user_id: int):
     conn.close()
     return favs
 
-# Конфиги
-@safe_db
-def add_config(name: str, desc: str, full: str, url: str, version: str, media: List[Dict] = None):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO configs (name, description, full_description, download_url, game_version, media)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, version, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
-
-@safe_db
-def update_config(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
-
 @safe_db
 def get_configs_by_version(version: str = 'all'):
     conn = sqlite3.connect(DB_PATH)
@@ -398,6 +402,15 @@ def remove_media(table: str, item_id: int, index: int) -> bool:
     conn.close()
     return False
 
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+def format_number(num: int) -> str:
+    if num < 1000:
+        return str(num)
+    elif num < 1000000:
+        return f"{num/1000:.1f}K"
+    else:
+        return f"{num/1000000:.1f}M"
+
 # ========== СОСТОЯНИЯ ==========
 class AdminStates(StatesGroup):
     client_name = State()
@@ -432,6 +445,7 @@ class BrowseStates(StatesGroup):
 
 # ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard(is_admin: bool = False):
+    """Главная клавиатура"""
     buttons = [
         [types.KeyboardButton(text="🎮 Клиенты")],
         [types.KeyboardButton(text="🎨 Ресурспаки")],
@@ -444,6 +458,7 @@ def get_main_keyboard(is_admin: bool = False):
     return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 def get_admin_main_keyboard():
+    """Главное меню админ-панели"""
     buttons = [
         [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
@@ -453,6 +468,7 @@ def get_admin_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_category_keyboard(category: str):
+    """Меню действий для категории"""
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить", callback_data=f"add_{category}")],
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{category}")],
@@ -463,6 +479,7 @@ def get_admin_category_keyboard(category: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_items_keyboard(items: List[Tuple], category: str, action: str):
+    """Клавиатура со списком элементов"""
     buttons = []
     for item_id, name, _, _ in items[:10]:
         buttons.append([InlineKeyboardButton(
@@ -473,6 +490,7 @@ def get_items_keyboard(items: List[Tuple], category: str, action: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_edit_fields_keyboard(category: str, item_id: int):
+    """Клавиатура выбора поля для редактирования"""
     if category == 'packs':
         fields = [
             ["📝 Название", f"edit_name_{category}_{item_id}"],
@@ -497,19 +515,10 @@ def get_edit_fields_keyboard(category: str, item_id: int):
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_media_keyboard(category: str, item_id: int):
-    buttons = [
-        [InlineKeyboardButton(text="📸 Добавить фото", callback_data=f"media_photo_{category}_{item_id}")],
-        [InlineKeyboardButton(text="🎬 Добавить видео/GIF", callback_data=f"media_video_{category}_{item_id}")],
-        [InlineKeyboardButton(text="🖼️ Просмотр", callback_data=f"media_view_{category}_{item_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"media_del_{category}_{item_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_{item_id}")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    """Старт бота"""
     is_admin = (message.from_user.id == ADMIN_ID)
     await message.answer(
         "👋 **Привет! Я бот-каталог Minecraft**\n\n"
@@ -524,9 +533,10 @@ async def cmd_start(message: Message):
 
 @dp.message(F.text == "ℹ️ О боте")
 async def about(message: Message):
+    """Информация о боте"""
     is_admin = (message.from_user.id == ADMIN_ID)
     await message.answer(
-        "ℹ️ **О боте**\n\nВерсия: 3.2\nРазработчик: @pablo5850004",
+        "ℹ️ **О боте**\n\nВерсия: 3.3\nРазработчик: @pablo5850004",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard(is_admin)
     )
@@ -859,11 +869,16 @@ async def download_item(callback: CallbackQuery):
         return
     increment_download(table, item_id)
     name = item[1]
-    url = item[5]  # download_url
+    if table == 'resourcepacks':
+        url = item[5]
+    elif table == 'clients':
+        url = item[5]
+    else:
+        url = item[5]
     await callback.message.answer(f"📥 **Скачать {name}**\n\n[Нажми для скачивания]({url})", parse_mode="Markdown")
     await callback.answer("✅ Ссылка отправлена!")
 
-@dp.callback_query(lambda c: c.data.startswith("media_"))
+@dp.callback_query(lambda c: c.data.startswith("media_") and not c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     _, table, item_id = callback.data.split("_")
     item_id = int(item_id)
@@ -969,23 +984,14 @@ async def admin_category(callback: CallbackQuery):
                                      reply_markup=get_admin_category_keyboard(cat))
     await callback.answer()
 
-# ========== АДМИН: ДОБАВЛЕНИЕ ==========
-@dp.callback_query(lambda c: c.data.startswith("add_"))
-async def add_start(callback: CallbackQuery, state: FSMContext):
+# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
+@dp.callback_query(lambda c: c.data.startswith("add_clients"))
+async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    category = callback.data.replace("add_", "")
-    await state.update_data(category=category)
-    if category == "packs":
-        await state.set_state(AdminStates.pack_name)
-        await callback.message.edit_text("📝 Введи **название** ресурспака:", parse_mode="Markdown")
-    elif category == "clients":
-        await state.set_state(AdminStates.client_name)
-        await callback.message.edit_text("📝 Введи **название** клиента:", parse_mode="Markdown")
-    elif category == "configs":
-        await state.set_state(AdminStates.config_name)
-        await callback.message.edit_text("📝 Введи **название** конфига:", parse_mode="Markdown")
+    await state.set_state(AdminStates.client_name)
+    await callback.message.edit_text("📝 Введи **название** клиента:", parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(AdminStates.client_name)
@@ -1022,20 +1028,55 @@ async def client_url(message: Message, state: FSMContext):
 async def client_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
-        item_id = add_client(data['client_name'], data['client_desc'], data['client_full'],
-                            data['client_url'], data['client_version'], media_list)
+        item_id = add_client(
+            data['client_name'], 
+            data['client_desc'], 
+            data['client_full'],
+            data['client_url'], 
+            data['client_version'], 
+            media_list
+        )
         await state.clear()
-        await message.answer(f"✅ **Клиент добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Клиент добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении клиента**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_client(data['client_name'], data['client_desc'], data['client_full'],
-                            data['client_url'], data['client_version'], [])
+        item_id = add_client(
+            data['client_name'], 
+            data['client_desc'], 
+            data['client_full'],
+            data['client_url'], 
+            data['client_version'], 
+            []
+        )
         await state.clear()
-        await message.answer(f"✅ **Клиент добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Клиент добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении клиента**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     media_type = None
     media_id = None
     if message.photo:
@@ -1053,6 +1094,16 @@ async def client_media(message: Message, state: FSMContext):
     media_list.append({'type': media_type, 'id': media_id})
     await state.update_data(media_list=media_list)
     await message.answer(f"✅ Медиа добавлено! Всего: {len(media_list)}")
+
+# ========== АДМИН: ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
+@dp.callback_query(lambda c: c.data.startswith("add_packs"))
+async def add_pack_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    await state.set_state(AdminStates.pack_name)
+    await callback.message.edit_text("📝 Введи **название** ресурспака:", parse_mode="Markdown")
+    await callback.answer()
 
 @dp.message(AdminStates.pack_name)
 async def pack_name(message: Message, state: FSMContext):
@@ -1100,20 +1151,59 @@ async def pack_url(message: Message, state: FSMContext):
 async def pack_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
-        item_id = add_pack(data['pack_name'], data['pack_desc'], data['pack_full'], data['pack_url'],
-                          data['pack_min'], data['pack_max'], data['pack_author'], media_list)
+        item_id = add_pack(
+            data['pack_name'], 
+            data['pack_desc'], 
+            data['pack_full'],
+            data['pack_url'], 
+            data['pack_min'], 
+            data['pack_max'], 
+            data['pack_author'], 
+            media_list
+        )
         await state.clear()
-        await message.answer(f"✅ **Ресурспак добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Ресурспак добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении ресурспака**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_pack(data['pack_name'], data['pack_desc'], data['pack_full'], data['pack_url'],
-                          data['pack_min'], data['pack_max'], data['pack_author'], [])
+        item_id = add_pack(
+            data['pack_name'], 
+            data['pack_desc'], 
+            data['pack_full'],
+            data['pack_url'], 
+            data['pack_min'], 
+            data['pack_max'], 
+            data['pack_author'], 
+            []
+        )
         await state.clear()
-        await message.answer(f"✅ **Ресурспак добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Ресурспак добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении ресурспака**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     media_type = None
     media_id = None
     if message.photo:
@@ -1131,6 +1221,16 @@ async def pack_media(message: Message, state: FSMContext):
     media_list.append({'type': media_type, 'id': media_id})
     await state.update_data(media_list=media_list)
     await message.answer(f"✅ Медиа добавлено! Всего: {len(media_list)}")
+
+# ========== АДМИН: ДОБАВЛЕНИЕ КОНФИГА ==========
+@dp.callback_query(lambda c: c.data.startswith("add_configs"))
+async def add_config_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    await state.set_state(AdminStates.config_name)
+    await callback.message.edit_text("📝 Введи **название** конфига:", parse_mode="Markdown")
+    await callback.answer()
 
 @dp.message(AdminStates.config_name)
 async def config_name(message: Message, state: FSMContext):
@@ -1166,20 +1266,55 @@ async def config_url(message: Message, state: FSMContext):
 async def config_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
-        item_id = add_config(data['config_name'], data['config_desc'], data['config_full'],
-                            data['config_url'], data['config_version'], media_list)
+        item_id = add_config(
+            data['config_name'], 
+            data['config_desc'], 
+            data['config_full'],
+            data['config_url'], 
+            data['config_version'], 
+            media_list
+        )
         await state.clear()
-        await message.answer(f"✅ **Конфиг добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Конфиг добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении конфига**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_config(data['config_name'], data['config_desc'], data['config_full'],
-                            data['config_url'], data['config_version'], [])
+        item_id = add_config(
+            data['config_name'], 
+            data['config_desc'], 
+            data['config_full'],
+            data['config_url'], 
+            data['config_version'], 
+            []
+        )
         await state.clear()
-        await message.answer(f"✅ **Конфиг добавлен!**\nID: {item_id}", parse_mode="Markdown",
-                            reply_markup=get_main_keyboard(is_admin=True))
+        if item_id:
+            await message.answer(
+                f"✅ **Конфиг добавлен!**\nID: `{item_id}`", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении конфига**", 
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
         return
+    
     media_type = None
     media_id = None
     if message.photo:
@@ -1264,62 +1399,6 @@ async def edit_value(message: Message, state: FSMContext):
         update_config(item_id, field, message.text)
     await state.clear()
     await message.answer("✅ **Обновлено!**", parse_mode="Markdown", reply_markup=get_main_keyboard(is_admin=True))
-
-# ========== АДМИН: МЕДИА ==========
-@dp.callback_query(lambda c: c.data.startswith("media_"))
-async def media_menu(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    action, category, item_id = callback.data.split("_", 2)
-    item_id = int(item_id)
-    if action in ["media_photo", "media_video"]:
-        media_type = "photo" if action == "media_photo" else "video"
-        await state.update_data(media_action=media_type, media_category=category, media_item_id=item_id)
-        await state.set_state(AdminStates.edit_value)
-        await callback.message.edit_text(f"📸 Отправь {'фото' if media_type=='photo' else 'видео/GIF'}:", parse_mode="Markdown")
-    elif action == "media_view":
-        item = get_item(category, item_id)
-        if not item:
-            await callback.answer("❌ Не найден", show_alert=True)
-            return
-        media_list = json.loads(item[4]) if item[4] else []
-        if not media_list:
-            await callback.answer("📭 Нет медиа", show_alert=True)
-            return
-        await state.update_data(media_list=media_list, media_index=0, media_category=category, media_item_id=item_id)
-        await show_media(callback.message, state, 0)
-    elif action == "media_del":
-        item = get_item(category, item_id)
-        if not item:
-            await callback.answer("❌ Не найден", show_alert=True)
-            return
-        media_list = json.loads(item[4]) if item[4] else []
-        if not media_list:
-            await callback.answer("📭 Нет медиа", show_alert=True)
-            return
-        buttons = []
-        for i, m in enumerate(media_list):
-            mtype = "🖼️" if m['type'] == 'photo' else "🎬"
-            buttons.append([InlineKeyboardButton(text=f"{mtype} Медиа {i+1}", callback_data=f"media_remove_{category}_{item_id}_{i}")])
-        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"media_{category}_{item_id}")])
-        await callback.message.edit_text("🗑 **Выбери медиа для удаления:**", parse_mode="Markdown",
-                                         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("media_remove_"))
-async def media_remove(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    _, _, category, item_id, index = callback.data.split("_")
-    item_id = int(item_id)
-    index = int(index)
-    if remove_media(category, item_id, index):
-        await callback.answer("✅ Удалено!", show_alert=True)
-    else:
-        await callback.answer("❌ Ошибка", show_alert=True)
-    await media_menu(callback, state)
 
 # ========== АДМИН: УДАЛЕНИЕ ==========
 @dp.callback_query(lambda c: c.data.startswith("delete_"))
