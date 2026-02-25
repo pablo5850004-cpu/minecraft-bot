@@ -25,10 +25,26 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# ========== БАЗА ДАННЫХ ==========
+# ========== ИСПРАВЛЕННАЯ БАЗА ДАННЫХ ==========
 def init_db():
-    """Создание всех таблиц"""
-    conn = sqlite3.connect('clients.db')
+    """Создание всех таблиц с обработкой ошибок"""
+    db_path = 'clients.db'
+    
+    # Если файл БД повреждён - удаляем его и создаём новый
+    if os.path.exists(db_path):
+        try:
+            # Пробуем открыть БД для проверки
+            test_conn = sqlite3.connect(db_path)
+            test_cur = test_conn.cursor()
+            test_cur.execute("SELECT 1")
+            test_conn.close()
+            print("✅ Существующая БД в порядке")
+        except sqlite3.DatabaseError:
+            print("⚠️ База данных повреждена, создаём новую...")
+            os.remove(db_path)
+    
+    # Создаём новую БД
+    conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     
     # Клиенты
@@ -94,222 +110,304 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ База данных готова")
+    print("✅ База данных успешно создана!")
 
+# Инициализируем БД при запуске
 init_db()
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 def get_item(table: str, item_id: int) -> Optional[Tuple]:
     """Получить элемент по ID"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'SELECT * FROM {table} WHERE id = ?', (item_id,))
-    item = cur.fetchone()
-    conn.close()
-    return item
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'SELECT * FROM {table} WHERE id = ?', (item_id,))
+        item = cur.fetchone()
+        conn.close()
+        return item
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_item, пересоздаём...")
+        init_db()
+        return None
 
 def get_all_items(table: str) -> List[Tuple]:
     """Получить все элементы"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'SELECT id, name, description, downloads FROM {table} ORDER BY created_at DESC')
-    items = cur.fetchall()
-    conn.close()
-    return items
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'SELECT id, name, description, downloads FROM {table} ORDER BY created_at DESC')
+        items = cur.fetchall()
+        conn.close()
+        return items
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_all_items, пересоздаём...")
+        init_db()
+        return []
 
 def delete_item(table: str, item_id: int):
     """Удалить элемент"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'DELETE FROM {table} WHERE id = ?', (item_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'DELETE FROM {table} WHERE id = ?', (item_id,))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в delete_item")
+        init_db()
 
 # Клиенты
 def add_client(name: str, desc: str, full: str, url: str, version: str, media: List[Dict] = None):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO clients (name, description, full_description, download_url, version, media)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, version, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO clients (name, description, full_description, download_url, version, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, version, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        return item_id
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в add_client")
+        init_db()
+        return None
 
 def update_client(item_id: int, field: str, value: str):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в update_client")
+        init_db()
 
 def get_clients_by_version(version: str = 'all') -> List[Tuple]:
     """Получить клиентов по версии"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    if version == 'all':
-        cur.execute('SELECT id, name, description, media, downloads, views, version FROM clients ORDER BY downloads DESC')
-    else:
-        cur.execute('SELECT id, name, description, media, downloads, views, version FROM clients WHERE version = ? ORDER BY downloads DESC', (version,))
-    items = cur.fetchall()
-    conn.close()
-    return items
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        if version == 'all':
+            cur.execute('SELECT id, name, description, media, downloads, views, version FROM clients ORDER BY downloads DESC')
+        else:
+            cur.execute('SELECT id, name, description, media, downloads, views, version FROM clients WHERE version = ? ORDER BY downloads DESC', (version,))
+        items = cur.fetchall()
+        conn.close()
+        return items
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_clients_by_version")
+        init_db()
+        return []
 
 def get_client_versions() -> List[str]:
     """Получить все версии клиентов"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL')
-    versions = [v[0] for v in cur.fetchall()]
-    conn.close()
-    return versions
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL')
+        versions = [v[0] for v in cur.fetchall()]
+        conn.close()
+        return versions
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_client_versions")
+        init_db()
+        return []
 
 # Ресурспаки
 def add_pack(name: str, desc: str, full: str, url: str, min_v: str, max_v: str, author: str, media: List[Dict] = None):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO resourcepacks (name, description, full_description, download_url, min_version, max_version, author, media)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, min_v, max_v, author, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO resourcepacks (name, description, full_description, download_url, min_version, max_version, author, media)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, min_v, max_v, author, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        return item_id
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в add_pack")
+        init_db()
+        return None
 
 def update_pack(item_id: int, field: str, value: str):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в update_pack")
+        init_db()
 
 def get_packs_by_version(version: str, sort: str = 'popular') -> List[Tuple]:
     """Получить ресурспаки подходящие под версию"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    
-    # Преобразуем версию в число для сравнения
     try:
-        v_num = float(version)
-    except:
-        v_num = 0
-    
-    # Ищем паки, где версия входит в диапазон
-    cur.execute('''
-        SELECT id, name, description, media, downloads, likes, views, min_version, max_version, author 
-        FROM resourcepacks 
-        WHERE CAST(min_version AS FLOAT) <= ? AND CAST(max_version AS FLOAT) >= ?
-    ''', (v_num, v_num))
-    
-    packs = cur.fetchall()
-    
-    # Сортируем
-    if sort == 'popular':
-        packs.sort(key=lambda x: x[4], reverse=True)  # по downloads
-    elif sort == 'likes':
-        packs.sort(key=lambda x: x[5], reverse=True)  # по likes
-    elif sort == 'random':
-        random.shuffle(packs)
-    
-    conn.close()
-    return packs
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        
+        # Преобразуем версию в число для сравнения
+        try:
+            v_num = float(version)
+        except:
+            v_num = 0
+        
+        # Ищем паки, где версия входит в диапазон
+        cur.execute('''
+            SELECT id, name, description, media, downloads, likes, views, min_version, max_version, author 
+            FROM resourcepacks 
+            WHERE CAST(min_version AS FLOAT) <= ? AND CAST(max_version AS FLOAT) >= ?
+        ''', (v_num, v_num))
+        
+        packs = cur.fetchall()
+        
+        # Сортируем
+        if sort == 'popular':
+            packs.sort(key=lambda x: x[4], reverse=True)  # по downloads
+        elif sort == 'likes':
+            packs.sort(key=lambda x: x[5], reverse=True)  # по likes
+        elif sort == 'random':
+            random.shuffle(packs)
+        
+        conn.close()
+        return packs
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_packs_by_version")
+        init_db()
+        return []
 
 def get_pack_versions() -> List[str]:
     """Получить все доступные версии"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute('SELECT DISTINCT min_version FROM resourcepacks UNION SELECT DISTINCT max_version FROM resourcepacks')
-    versions = set()
-    for v in cur.fetchall():
-        try:
-            versions.add(str(float(v[0])))
-        except:
-            pass
-    conn.close()
-    return sorted(list(versions), key=lambda x: float(x))
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT min_version FROM resourcepacks UNION SELECT DISTINCT max_version FROM resourcepacks')
+        versions = set()
+        for v in cur.fetchall():
+            try:
+                versions.add(str(float(v[0])))
+            except:
+                pass
+        conn.close()
+        return sorted(list(versions), key=lambda x: float(x))
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_pack_versions")
+        init_db()
+        return []
 
 def toggle_favorite(user_id: int, pack_id: int) -> bool:
     """Добавить/удалить из избранного"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    
-    cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
-    exists = cur.fetchone()
-    
-    if exists:
-        cur.execute('DELETE FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
-        cur.execute('UPDATE resourcepacks SET likes = likes - 1 WHERE id = ?', (pack_id,))
-        conn.commit()
-        conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        
+        cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
+        exists = cur.fetchone()
+        
+        if exists:
+            cur.execute('DELETE FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
+            cur.execute('UPDATE resourcepacks SET likes = likes - 1 WHERE id = ?', (pack_id,))
+            conn.commit()
+            conn.close()
+            return False
+        else:
+            cur.execute('INSERT INTO favorites (user_id, pack_id) VALUES (?, ?)', (user_id, pack_id))
+            cur.execute('UPDATE resourcepacks SET likes = likes + 1 WHERE id = ?', (pack_id,))
+            conn.commit()
+            conn.close()
+            return True
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в toggle_favorite")
+        init_db()
         return False
-    else:
-        cur.execute('INSERT INTO favorites (user_id, pack_id) VALUES (?, ?)', (user_id, pack_id))
-        cur.execute('UPDATE resourcepacks SET likes = likes + 1 WHERE id = ?', (pack_id,))
-        conn.commit()
-        conn.close()
-        return True
 
 def get_favorites(user_id: int) -> List[Tuple]:
     """Получить избранное пользователя"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute('''
-        SELECT r.id, r.name, r.description, r.media, r.downloads, r.likes 
-        FROM resourcepacks r
-        JOIN favorites f ON r.id = f.pack_id
-        WHERE f.user_id = ?
-        ORDER BY f.added_at DESC
-    ''', (user_id,))
-    favs = cur.fetchall()
-    conn.close()
-    return favs
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT r.id, r.name, r.description, r.media, r.downloads, r.likes 
+            FROM resourcepacks r
+            JOIN favorites f ON r.id = f.pack_id
+            WHERE f.user_id = ?
+            ORDER BY f.added_at DESC
+        ''', (user_id,))
+        favs = cur.fetchall()
+        conn.close()
+        return favs
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_favorites")
+        init_db()
+        return []
 
 # Конфиги
 def add_config(name: str, desc: str, full: str, url: str, version: str, media: List[Dict] = None):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    media_json = json.dumps(media or [])
-    cur.execute('''
-        INSERT INTO configs (name, description, full_description, download_url, game_version, media)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (name, desc, full, url, version, media_json))
-    conn.commit()
-    item_id = cur.lastrowid
-    conn.close()
-    return item_id
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        media_json = json.dumps(media or [])
+        cur.execute('''
+            INSERT INTO configs (name, description, full_description, download_url, game_version, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, desc, full, url, version, media_json))
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        return item_id
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в add_config")
+        init_db()
+        return None
 
 def update_config(item_id: int, field: str, value: str):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в update_config")
+        init_db()
 
 def get_configs_by_version(version: str = 'all') -> List[Tuple]:
     """Получить конфиги по версии"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    if version == 'all':
-        cur.execute('SELECT id, name, description, media, downloads, views, game_version FROM configs ORDER BY downloads DESC')
-    else:
-        cur.execute('SELECT id, name, description, media, downloads, views, game_version FROM configs WHERE game_version = ? ORDER BY downloads DESC', (version,))
-    items = cur.fetchall()
-    conn.close()
-    return items
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        if version == 'all':
+            cur.execute('SELECT id, name, description, media, downloads, views, game_version FROM configs ORDER BY downloads DESC')
+        else:
+            cur.execute('SELECT id, name, description, media, downloads, views, game_version FROM configs WHERE game_version = ? ORDER BY downloads DESC', (version,))
+        items = cur.fetchall()
+        conn.close()
+        return items
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_configs_by_version")
+        init_db()
+        return []
 
 def get_config_versions() -> List[str]:
     """Получить все версии конфигов"""
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute('SELECT DISTINCT game_version FROM configs WHERE game_version IS NOT NULL')
-    versions = [v[0] for v in cur.fetchall()]
-    conn.close()
-    return versions
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT game_version FROM configs WHERE game_version IS NOT NULL')
+        versions = [v[0] for v in cur.fetchall()]
+        conn.close()
+        return versions
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в get_config_versions")
+        init_db()
+        return []
 
 # Медиа
 def add_media(table: str, item_id: int, media_type: str, media_id: str) -> bool:
@@ -360,18 +458,26 @@ def remove_media(table: str, item_id: int, index: int) -> bool:
 
 # Просмотры и скачивания
 def increment_view(table: str, item_id: int):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'UPDATE {table} SET views = views + 1 WHERE id = ?', (item_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'UPDATE {table} SET views = views + 1 WHERE id = ?', (item_id,))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в increment_view")
+        init_db()
 
 def increment_download(table: str, item_id: int):
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute(f'UPDATE {table} SET downloads = downloads + 1 WHERE id = ?', (item_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute(f'UPDATE {table} SET downloads = downloads + 1 WHERE id = ?', (item_id,))
+        conn.commit()
+        conn.close()
+    except sqlite3.DatabaseError:
+        print(f"⚠️ Ошибка БД в increment_download")
+        init_db()
 
 # ========== СОСТОЯНИЯ ==========
 class AdminStates(StatesGroup):
@@ -485,7 +591,10 @@ async def show_next_client(message: Message, state: FSMContext, index: int, cate
     increment_view('clients', client_id)
     
     # Получаем медиа
-    media_list = json.loads(client[3]) if client[3] else []
+    try:
+        media_list = json.loads(client[3]) if client[3] else []
+    except:
+        media_list = []
     
     text = (
         f"**{client[1]}**\n\n"
@@ -635,14 +744,20 @@ async def show_next_pack(message: Message, state: FSMContext, index: int):
     increment_view('resourcepacks', pack_id)
     
     # Проверяем в избранном
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', (message.chat.id, pack_id))
-    is_fav = cur.fetchone() is not None
-    conn.close()
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', (message.chat.id, pack_id))
+        is_fav = cur.fetchone() is not None
+        conn.close()
+    except:
+        is_fav = False
     
     # Получаем медиа
-    media_list = json.loads(pack[3]) if pack[3] else []
+    try:
+        media_list = json.loads(pack[3]) if pack[3] else []
+    except:
+        media_list = []
     
     text = (
         f"**{pack[1]}**\n\n"
@@ -801,7 +916,10 @@ async def show_next_config(message: Message, state: FSMContext, index: int):
     increment_view('configs', config_id)
     
     # Получаем медиа
-    media_list = json.loads(config[3]) if config[3] else []
+    try:
+        media_list = json.loads(config[3]) if config[3] else []
+    except:
+        media_list = []
     
     text = (
         f"**{config[1]}**\n\n"
@@ -945,7 +1063,10 @@ async def view_media(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Не найден", show_alert=True)
         return
     
-    media_list = json.loads(item[4]) if item[4] else []  # media поле
+    try:
+        media_list = json.loads(item[4]) if item[4] else []  # media поле
+    except:
+        media_list = []
     
     if not media_list:
         await callback.answer("📭 Нет медиа", show_alert=True)
@@ -1056,45 +1177,50 @@ async def cmd_start(message: Message):
 async def about(message: Message):
     is_admin = (message.from_user.id == ADMIN_ID)
     
-    conn = sqlite3.connect('clients.db')
-    cur = conn.cursor()
-    
-    cur.execute('SELECT COUNT(*) FROM clients')
-    clients = cur.fetchone()[0]
-    
-    cur.execute('SELECT COUNT(*) FROM resourcepacks')
-    packs = cur.fetchone()[0]
-    
-    cur.execute('SELECT COUNT(*) FROM configs')
-    configs = cur.fetchone()[0]
-    
-    cur.execute('SELECT SUM(downloads) FROM clients')
-    clients_d = cur.fetchone()[0] or 0
-    
-    cur.execute('SELECT SUM(downloads) FROM resourcepacks')
-    packs_d = cur.fetchone()[0] or 0
-    
-    cur.execute('SELECT SUM(downloads) FROM configs')
-    configs_d = cur.fetchone()[0] or 0
-    
-    conn.close()
-    
-    await message.answer(
-        "ℹ️ **О боте**\n\n"
-        f"📊 **Статистика:**\n"
-        f"🎮 Клиентов: {clients}\n"
-        f"🎨 Ресурспаков: {packs}\n"
-        f"⚙️ Конфигов: {configs}\n"
-        f"📥 Всего скачиваний: {format_number(clients_d + packs_d + configs_d)}\n\n"
-        "Версия: 3.0\n"
-        "Разработчик: @pablo5850004",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard(is_admin)
-    )
-
-# ========== АДМИН ПАНЕЛЬ (ВСТАВЬ СЮДА ВЕСЬ АДМИН-КОД ИЗ ПРЕДЫДУЩЕГО СООБЩЕНИЯ) ==========
-# Здесь должен быть весь код админ-панели, который я дал в прошлом сообщении
-# (он очень длинный, поэтому я его не копирую сюда, но ты можешь вставить его сам)
+    try:
+        conn = sqlite3.connect('clients.db')
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM clients')
+        clients = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM resourcepacks')
+        packs = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM configs')
+        configs = cur.fetchone()[0]
+        
+        cur.execute('SELECT SUM(downloads) FROM clients')
+        clients_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM resourcepacks')
+        packs_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM configs')
+        configs_d = cur.fetchone()[0] or 0
+        
+        conn.close()
+        
+        await message.answer(
+            "ℹ️ **О боте**\n\n"
+            f"📊 **Статистика:**\n"
+            f"🎮 Клиентов: {clients}\n"
+            f"🎨 Ресурспаков: {packs}\n"
+            f"⚙️ Конфигов: {configs}\n"
+            f"📥 Всего скачиваний: {format_number(clients_d + packs_d + configs_d)}\n\n"
+            "Версия: 3.1\n"
+            "Разработчик: @pablo5850004",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(is_admin)
+        )
+    except:
+        await message.answer(
+            "ℹ️ **О боте**\n\n"
+            "Версия: 3.1\n"
+            "Разработчик: @pablo5850004",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(is_admin)
+        )
 
 # ========== ЗАПУСК ==========
 async def main():
