@@ -36,6 +36,7 @@ BACKUP_DIR = 'backups'
 USERS_DB_PATH = 'users.db'
 PERMANENT_BACKUP_DIR = './persistent_backups'
 
+# Создаём все необходимые папки
 os.makedirs(BACKUP_DIR, exist_ok=True)
 os.makedirs(PERMANENT_BACKUP_DIR, exist_ok=True)
 
@@ -196,108 +197,50 @@ def get_users_count():
         logger.error(f"Ошибка подсчёта пользователей: {e}")
         return 0
 
-# ========== ФУНКЦИИ ДЛЯ СОЗДАНИЯ ZIP БЭКАПА ==========
+# ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
+def get_all_backups():
+    """Получает ВСЕ ZIP файлы из постоянной папки"""
+    try:
+        files = os.listdir(PERMANENT_BACKUP_DIR)
+        backups = [f for f in files if f.endswith('.zip')]
+        backups.sort(reverse=True)
+        return backups
+    except Exception as e:
+        print(f"Ошибка получения списка: {e}")
+        return []
+
 async def create_zip_backup():
-    """Создаёт ZIP архив со всеми файлами бэкапа"""
+    """Создаёт ZIP бэкап и сохраняет в постоянную папку"""
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         zip_filename = f"backup_{timestamp}.zip"
         zip_path = os.path.join(PERMANENT_BACKUP_DIR, zip_filename)
         
-        # Создаём ZIP архив
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Добавляем .db файлы
             if os.path.exists(DB_PATH):
                 zipf.write(DB_PATH, 'clients.db')
-            
             if os.path.exists(USERS_DB_PATH):
                 zipf.write(USERS_DB_PATH, 'users.db')
             
-            # Создаём и добавляем JSON бэкап
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            
-            backup_data = {
-                "clients": [],
-                "resourcepacks": [],
-                "configs": [],
-                "favorites": [],
-                "users": [],
-                "backup_date": datetime.now().isoformat(),
-                "version": "1.0"
-            }
-            
-            # Сохраняем клиентов
-            cur.execute('SELECT * FROM clients')
-            columns = [description[0] for description in cur.description]
-            for row in cur.fetchall():
-                backup_data["clients"].append(dict(zip(columns, row)))
-            
-            # Сохраняем ресурспаки
-            cur.execute('SELECT * FROM resourcepacks')
-            columns = [description[0] for description in cur.description]
-            for row in cur.fetchall():
-                backup_data["resourcepacks"].append(dict(zip(columns, row)))
-            
-            # Сохраняем конфиги
-            cur.execute('SELECT * FROM configs')
-            columns = [description[0] for description in cur.description]
-            for row in cur.fetchall():
-                backup_data["configs"].append(dict(zip(columns, row)))
-            
-            # Сохраняем избранное
-            cur.execute('SELECT * FROM favorites')
-            columns = [description[0] for description in cur.description]
-            for row in cur.fetchall():
-                backup_data["favorites"].append(dict(zip(columns, row)))
-            
-            conn.close()
-            
-            # Сохраняем пользователей
-            try:
-                conn_users = sqlite3.connect(USERS_DB_PATH)
-                cur_users = conn_users.cursor()
-                cur_users.execute('SELECT * FROM users')
-                columns_users = [description[0] for description in cur_users.description]
-                for row in cur_users.fetchall():
-                    backup_data["users"].append(dict(zip(columns_users, row)))
-                conn_users.close()
-            except:
-                pass
-            
-            # Сохраняем JSON в ZIP
-            json_filename = f"data_{timestamp}.json"
-            json_path = os.path.join(BACKUP_DIR, json_filename)
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
-            
-            zipf.write(json_path, json_filename)
-            os.remove(json_path)  # Удаляем временный JSON
-            
-            # Добавляем README с информацией
-            readme_content = f"""# Бэкап базы данных Minecraft бота
-
+            # Добавляем информационный файл
+            info_content = f"""# Бэкап базы данных Minecraft бота
 Дата создания: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-Файлы в архиве:
+Файлы:
 - clients.db - основная база данных
 - users.db - база пользователей
-- {json_filename} - резервная копия в JSON формате
-
-Для восстановления отправь этот ZIP файл боту.
 """
-            readme_path = os.path.join(BACKUP_DIR, "README.txt")
-            with open(readme_path, 'w', encoding='utf-8') as f:
-                f.write(readme_content)
-            
-            zipf.write(readme_path, "README.txt")
-            os.remove(readme_path)
+            info_path = os.path.join(BACKUP_DIR, "README.txt")
+            with open(info_path, 'w', encoding='utf-8') as f:
+                f.write(info_content)
+            zipf.write(info_path, "README.txt")
+            os.remove(info_path)
         
-        logger.info(f"✅ ZIP бэкап создан: {zip_filename}")
-        return zip_path
+        if os.path.exists(zip_path):
+            return zip_path, zip_filename
+        return None, None
     except Exception as e:
-        logger.error(f"❌ Ошибка создания ZIP бэкапа: {e}")
-        return None
+        logger.error(f"Ошибка создания бэкапа: {e}")
+        return None, None
 
 async def restore_from_zip(zip_path: str):
     """Восстанавливает базу из ZIP архива"""
@@ -305,122 +248,26 @@ async def restore_from_zip(zip_path: str):
         extract_dir = os.path.join(BACKUP_DIR, "restore_temp")
         os.makedirs(extract_dir, exist_ok=True)
         
-        # Распаковываем ZIP
         with zipfile.ZipFile(zip_path, 'r') as zipf:
             zipf.extractall(extract_dir)
         
         # Ищем .db файлы
-        db_files = []
-        json_files = []
+        restored = False
         for file in os.listdir(extract_dir):
             if file.endswith('.db'):
-                db_files.append(file)
-            elif file.endswith('.json'):
-                json_files.append(file)
-        
-        # Если есть .db файлы - просто копируем их
-        if db_files:
-            for db_file in db_files:
-                src = os.path.join(extract_dir, db_file)
-                if db_file == 'clients.db':
+                src = os.path.join(extract_dir, file)
+                if file == 'clients.db' or file.endswith('clients.db'):
                     shutil.copy2(src, DB_PATH)
-                elif db_file == 'users.db':
+                    restored = True
+                elif file == 'users.db' or file.endswith('users.db'):
                     shutil.copy2(src, USERS_DB_PATH)
-            
-            logger.info(f"✅ База восстановлена из .db файлов")
-            shutil.rmtree(extract_dir)
-            return True
+                    restored = True
         
-        # Если есть JSON - восстанавливаем из JSON
-        elif json_files:
-            with open(os.path.join(extract_dir, json_files[0]), 'r', encoding='utf-8') as f:
-                backup_data = json.load(f)
-            
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            cur.execute('BEGIN TRANSACTION')
-            
-            try:
-                # Очищаем таблицы
-                cur.execute('DELETE FROM favorites')
-                cur.execute('DELETE FROM resourcepacks')
-                cur.execute('DELETE FROM configs')
-                cur.execute('DELETE FROM clients')
-                
-                # Восстанавливаем клиентов
-                for client in backup_data.get("clients", []):
-                    columns = ', '.join(client.keys())
-                    placeholders = ', '.join(['?' for _ in client])
-                    values = list(client.values())
-                    cur.execute(f'INSERT INTO clients ({columns}) VALUES ({placeholders})', values)
-                
-                # Восстанавливаем ресурспаки
-                for pack in backup_data.get("resourcepacks", []):
-                    columns = ', '.join(pack.keys())
-                    placeholders = ', '.join(['?' for _ in pack])
-                    values = list(pack.values())
-                    cur.execute(f'INSERT INTO resourcepacks ({columns}) VALUES ({placeholders})', values)
-                
-                # Восстанавливаем конфиги
-                for config in backup_data.get("configs", []):
-                    columns = ', '.join(config.keys())
-                    placeholders = ', '.join(['?' for _ in config])
-                    values = list(config.values())
-                    cur.execute(f'INSERT INTO configs ({columns}) VALUES ({placeholders})', values)
-                
-                # Восстанавливаем избранное
-                for fav in backup_data.get("favorites", []):
-                    columns = ', '.join(fav.keys())
-                    placeholders = ', '.join(['?' for _ in fav])
-                    values = list(fav.values())
-                    cur.execute(f'INSERT INTO favorites ({columns}) VALUES ({placeholders})', values)
-                
-                conn.commit()
-                
-                # Восстанавливаем пользователей
-                if backup_data.get("users"):
-                    conn_users = sqlite3.connect(USERS_DB_PATH)
-                    cur_users = conn_users.cursor()
-                    cur_users.execute('DELETE FROM users')
-                    for user in backup_data["users"]:
-                        columns = ', '.join(user.keys())
-                        placeholders = ', '.join(['?' for _ in user])
-                        values = list(user.values())
-                        cur_users.execute(f'INSERT INTO users ({columns}) VALUES ({placeholders})', values)
-                    conn_users.commit()
-                    conn_users.close()
-                
-                logger.info(f"✅ База восстановлена из JSON")
-                shutil.rmtree(extract_dir)
-                return True
-                
-            except Exception as e:
-                conn.rollback()
-                logger.error(f"❌ Ошибка восстановления: {e}")
-                shutil.rmtree(extract_dir)
-                return False
-            finally:
-                conn.close()
-        
-        else:
-            logger.error("❌ В архиве нет файлов для восстановления")
-            shutil.rmtree(extract_dir)
-            return False
-            
+        shutil.rmtree(extract_dir)
+        return restored
     except Exception as e:
-        logger.error(f"❌ Ошибка распаковки ZIP: {e}")
+        logger.error(f"Ошибка восстановления: {e}")
         return False
-
-def list_zip_backups():
-    """Показывает список ZIP бэкапов"""
-    try:
-        files = os.listdir(PERMANENT_BACKUP_DIR)
-        backups = [f for f in files if f.startswith('backup_') and f.endswith('.zip')]
-        backups.sort(reverse=True)
-        return backups
-    except Exception as e:
-        logger.error(f"Ошибка получения списка бэкапов: {e}")
-        return []
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 def safe_db(func):
@@ -784,7 +631,6 @@ def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages
         media_json = item[3] if len(item) > 3 else '[]'
         downloads = item[4] if len(item) > 4 else 0
         
-        # Получаем версию
         version = item[6] if len(item) > 6 else "?"
         version_text = get_version_display(version)
         
@@ -802,7 +648,6 @@ def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages
             callback_data=f"detail_{category}_{item_id}"
         )])
     
-    # Пагинация
     nav_row = []
     if page > 1:
         nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"page_{category}_{page-1}"))
@@ -1279,8 +1124,7 @@ async def info(message: Message):
         conn.close()
         
         total_downloads = clients_d + packs_d + configs_d
-        
-        backup_count = len(list_zip_backups())
+        backup_count = len(get_all_backups())
         
         await message.answer(
             f"**Информация о боте**\n\n"
@@ -1434,37 +1278,49 @@ async def admin_zip_backups(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    backups = list_zip_backups()
+    backups = get_all_backups()
     
     text = "📦 **ZIP Бэкапы**\n\n"
+    text += f"📁 **Папка:** `{PERMANENT_BACKUP_DIR}`\n"
+    text += f"📊 **Всего бэкапов:** {len(backups)}\n\n"
     
     if backups:
-        text += "**Последние бэкапы:**\n"
+        text += "**Доступные бэкапы:**\n"
         for i, backup in enumerate(backups[:10], 1):
             size = os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, backup)) // 1024
-            text += f"{i}. `{backup}` ({size} KB)\n"
+            if backup.startswith('backup_'):
+                emoji = "📦"
+            elif backup.startswith('uploaded_'):
+                emoji = "📤"
+            else:
+                emoji = "📁"
+            text += f"{i}. {emoji} `{backup}` ({size} KB)\n"
     else:
-        text += "Пока нет бэкапов. Создай первый!\n"
+        text += "❌ **Бэкапов пока нет!**\n"
+        text += "Создай новый или загрузи существующий."
     
-    buttons = [
-        [InlineKeyboardButton(text="📥 Создать ZIP бэкап", callback_data="zip_backup_create")],
-        [InlineKeyboardButton(text="📤 Загрузить ZIP бэкап", callback_data="zip_backup_upload")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
-    ]
-    
-    if backups:
-        # Кнопки для скачивания последних 3 бэкапов
-        for backup in backups[:3]:
-            buttons.insert(-1, [InlineKeyboardButton(
-                text=f"📥 Скачать {backup[:20]}...",
-                callback_data=f"zip_backup_download_{backup}"
-            )])
-        
-        # Кнопка для восстановления
-        buttons.insert(-1, [InlineKeyboardButton(
-            text="🔄 Восстановить из последнего",
-            callback_data=f"zip_backup_restore_{backups[0]}"
+    # Создаём кнопки для каждого бэкапа
+    buttons = []
+    for backup in backups[:5]:
+        if backup.startswith('backup_'):
+            btn_text = f"📦 {backup[7:20]}..."
+        elif backup.startswith('uploaded_'):
+            btn_text = f"📤 {backup[9:20]}..."
+        else:
+            btn_text = f"📁 {backup[:15]}..."
+            
+        buttons.append([InlineKeyboardButton(
+            text=btn_text,
+            callback_data=f"zip_restore_{backup}"
         )])
+    
+    # Кнопки действий
+    buttons.append([
+        InlineKeyboardButton(text="📥 Создать новый", callback_data="zip_backup_create"),
+        InlineKeyboardButton(text="📤 Загрузить ZIP", callback_data="zip_backup_upload")
+    ])
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить список", callback_data="admin_zip_backups")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
     
     await callback.message.edit_text(
         text,
@@ -1482,55 +1338,31 @@ async def zip_backup_create(callback: CallbackQuery):
     
     await callback.message.edit_text("⏳ **Создание ZIP бэкапа...**", parse_mode="Markdown")
     
-    zip_path = await create_zip_backup()
+    zip_path, zip_filename = await create_zip_backup()
     
-    if zip_path:
-        # Отправляем ZIP файл админу
+    if zip_path and os.path.exists(zip_path):
+        size = os.path.getsize(zip_path) // 1024
+        
         await callback.message.answer_document(
             document=FSInputFile(zip_path),
-            caption=f"✅ ZIP бэкап создан: {os.path.basename(zip_path)}"
+            caption=f"✅ **ZIP бэкап создан!**\n\n"
+                    f"📁 Файл: `{zip_filename}`\n"
+                    f"📊 Размер: {size} KB\n"
+                    f"📍 Сохранён в папку бэкапов"
         )
-        
-        # Возвращаемся в меню
-        await admin_zip_backups(callback)
     else:
-        await callback.message.edit_text(
-            "❌ **Ошибка создания ZIP бэкапа**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
-            ])
-        )
-    await callback.answer()
+        await callback.message.answer("❌ **Ошибка создания бэкапа!**")
+    
+    await admin_zip_backups(callback)
 
-@dp.callback_query(lambda c: c.data.startswith("zip_backup_download_"))
-async def zip_backup_download(callback: CallbackQuery):
-    """Скачивание ZIP бэкапа"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    filename = callback.data.replace("zip_backup_download_", "")
-    filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
-    
-    if not os.path.exists(filepath):
-        await callback.answer("❌ Файл не найден", show_alert=True)
-        return
-    
-    await callback.message.answer_document(
-        document=FSInputFile(filepath),
-        caption=f"📦 ZIP бэкап: {filename}"
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("zip_backup_restore_"))
-async def zip_backup_restore(callback: CallbackQuery):
+@dp.callback_query(lambda c: c.data.startswith("zip_restore_"))
+async def zip_restore(callback: CallbackQuery):
     """Восстановление из ZIP бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    filename = callback.data.replace("zip_backup_restore_", "")
+    filename = callback.data.replace("zip_restore_", "")
     filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
     
     if not os.path.exists(filepath):
@@ -1539,7 +1371,7 @@ async def zip_backup_restore(callback: CallbackQuery):
     
     # Кнопка подтверждения
     buttons = [
-        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"zip_backup_restore_confirm_{filename}")],
+        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"zip_restore_confirm_{filename}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_zip_backups")]
     ]
     
@@ -1553,14 +1385,14 @@ async def zip_backup_restore(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("zip_backup_restore_confirm_"))
-async def zip_backup_restore_confirm(callback: CallbackQuery):
+@dp.callback_query(lambda c: c.data.startswith("zip_restore_confirm_"))
+async def zip_restore_confirm(callback: CallbackQuery):
     """Подтверждение восстановления из ZIP"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    filename = callback.data.replace("zip_backup_restore_confirm_", "")
+    filename = callback.data.replace("zip_restore_confirm_", "")
     filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
     
     await callback.message.edit_text("⏳ **Восстановление из ZIP...**", parse_mode="Markdown")
@@ -1599,8 +1431,8 @@ async def zip_backup_upload(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_for_backup)
     await callback.message.edit_text(
         "📤 **Отправь ZIP файл с бэкапом**\n\n"
-        "Файл должен быть в формате, созданном ботом.\n\n"
-        "После отправки ты сможешь восстановить из него данные.",
+        "Файл может называться как угодно, главное чтобы был .zip\n\n"
+        "После отправки файл появится в списке бэкапов.",
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -1617,21 +1449,46 @@ async def handle_zip_upload(message: Message, state: FSMContext):
         await message.answer("❌ Отправь файл!")
         return
     
-    # Проверяем расширение
     if not message.document.file_name.endswith('.zip'):
         await message.answer("❌ Файл должен быть в формате .zip")
         return
     
-    # Скачиваем файл
     file = await bot.get_file(message.document.file_id)
-    file_path = f"{PERMANENT_BACKUP_DIR}/uploaded_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{message.document.file_name}"
+    original_name = message.document.file_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Сохраняем с понятным именем
+    if original_name.startswith(('backup_', 'uploaded_')):
+        new_filename = original_name
+    else:
+        new_filename = f"uploaded_{timestamp}_{original_name}"
+    
+    file_path = os.path.join(PERMANENT_BACKUP_DIR, new_filename)
     await bot.download_file(file.file_path, file_path)
     
-    await message.answer(
-        f"✅ ZIP файл загружен как: `{os.path.basename(file_path)}`\n\n"
-        f"Теперь можешь восстановить его через меню бэкапов.",
-        parse_mode="Markdown"
-    )
+    if os.path.exists(file_path):
+        file_size = os.path.getsize(file_path) // 1024
+        await message.answer(
+            f"✅ **ZIP файл успешно загружен!**\n\n"
+            f"📁 Имя: `{new_filename}`\n"
+            f"📊 Размер: {file_size} KB\n"
+            f"📍 Папка: `{PERMANENT_BACKUP_DIR}`\n\n"
+            f"Теперь файл появится в меню бэкапов.\n"
+            f"Нажми **'📦 ZIP Бэкапы'** чтобы увидеть его.",
+            parse_mode="Markdown"
+        )
+        
+        # Показываем список всех бэкапов
+        all_backups = get_all_backups()
+        if all_backups:
+            list_text = "**Все доступные бэкапы:**\n"
+            for i, b in enumerate(all_backups[:5], 1):
+                size = os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, b)) // 1024
+                list_text += f"{i}. `{b[:30]}...` ({size} KB)\n"
+            await message.answer(list_text, parse_mode="Markdown")
+    else:
+        await message.answer("❌ **Ошибка при сохранении файла!**", parse_mode="Markdown")
+    
     await state.clear()
 
 # ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
@@ -2387,8 +2244,8 @@ async def admin_stats(callback: CallbackQuery):
         conn.close()
         
         users_count = get_users_count()
-        backup_count = len(list_zip_backups())
-        backup_size = sum(os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, f)) for f in list_zip_backups()) // 1024 if backup_count > 0 else 0
+        backup_count = len(get_all_backups())
+        backup_size = sum(os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, f)) for f in get_all_backups()) // 1024 if backup_count > 0 else 0
         
         text = (f"📊 **Статистика**\n\n"
                 f"👤 Пользователей: {users_count}\n"
@@ -2667,7 +2524,7 @@ async def main():
     print("✅ Бот запущен!")
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👤 Создатель: {CREATOR_USERNAME}")
-    print(f"📁 Постоянное хранилище: {PERMANENT_BACKUP_DIR}")
+    print(f"📁 Папка бэкапов: {PERMANENT_BACKUP_DIR}")
     print("="*50)
     print("📌 Функции:")
     print("   • 10 элементов на страницу")
@@ -2675,7 +2532,7 @@ async def main():
     print("   • Работающее удаление для всех категорий")
     print("   • Полная админ-панель")
     print("   • Рассылка сообщений")
-    print("   • 📦 ZIP бэкапы (скачивание и загрузка)")
+    print("   • 📦 ZIP бэкапы (все файлы видны!)")
     print("="*50)
     await dp.start_polling(bot)
 
