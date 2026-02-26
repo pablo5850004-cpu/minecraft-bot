@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import asyncio
 import json
@@ -215,6 +215,163 @@ def get_users_count():
     except Exception as e:
         logger.error(f"Ошибка подсчёта пользователей: {e}")
         return 0
+
+# ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
+async def backup_database_to_json():
+    """Создаёт JSON бэкап всех данных из SQLite"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        backup_data = {
+            "clients": [],
+            "resourcepacks": [],
+            "configs": [],
+            "favorites": [],
+            "users": [],
+            "backup_date": datetime.now().isoformat(),
+            "version": "1.0"
+        }
+        
+        # Сохраняем клиентов
+        cur.execute('SELECT * FROM clients')
+        columns = [description[0] for description in cur.description]
+        for row in cur.fetchall():
+            backup_data["clients"].append(dict(zip(columns, row)))
+        
+        # Сохраняем ресурспаки
+        cur.execute('SELECT * FROM resourcepacks')
+        columns = [description[0] for description in cur.description]
+        for row in cur.fetchall():
+            backup_data["resourcepacks"].append(dict(zip(columns, row)))
+        
+        # Сохраняем конфиги
+        cur.execute('SELECT * FROM configs')
+        columns = [description[0] for description in cur.description]
+        for row in cur.fetchall():
+            backup_data["configs"].append(dict(zip(columns, row)))
+        
+        # Сохраняем избранное
+        cur.execute('SELECT * FROM favorites')
+        columns = [description[0] for description in cur.description]
+        for row in cur.fetchall():
+            backup_data["favorites"].append(dict(zip(columns, row)))
+        
+        # Сохраняем пользователей
+        try:
+            conn_users = sqlite3.connect(USERS_DB_PATH)
+            cur_users = conn_users.cursor()
+            cur_users.execute('SELECT * FROM users')
+            columns_users = [description[0] for description in cur_users.description]
+            for row in cur_users.fetchall():
+                backup_data["users"].append(dict(zip(columns_users, row)))
+            conn_users.close()
+        except:
+            pass
+        
+        conn.close()
+        
+        # Создаём имя файла с датой
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{BACKUP_DIR}/database_backup_{timestamp}.json"
+        
+        # Сохраняем в файл
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
+        
+        logger.info(f"✅ Бэкап создан: {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания бэкапа: {e}")
+        return None
+
+async def restore_database_from_json(filename: str):
+    """Восстанавливает базу из JSON бэкапа"""
+    try:
+        # Читаем файл
+        with open(filename, 'r', encoding='utf-8') as f:
+            backup_data = json.load(f)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        # Начинаем транзакцию
+        cur.execute('BEGIN TRANSACTION')
+        
+        try:
+            # Очищаем все таблицы
+            cur.execute('DELETE FROM favorites')
+            cur.execute('DELETE FROM resourcepacks')
+            cur.execute('DELETE FROM configs')
+            cur.execute('DELETE FROM clients')
+            
+            # Восстанавливаем клиентов
+            for client in backup_data.get("clients", []):
+                columns = ', '.join(client.keys())
+                placeholders = ', '.join(['?' for _ in client])
+                values = list(client.values())
+                cur.execute(f'INSERT INTO clients ({columns}) VALUES ({placeholders})', values)
+            
+            # Восстанавливаем ресурспаки
+            for pack in backup_data.get("resourcepacks", []):
+                columns = ', '.join(pack.keys())
+                placeholders = ', '.join(['?' for _ in pack])
+                values = list(pack.values())
+                cur.execute(f'INSERT INTO resourcepacks ({columns}) VALUES ({placeholders})', values)
+            
+            # Восстанавливаем конфиги
+            for config in backup_data.get("configs", []):
+                columns = ', '.join(config.keys())
+                placeholders = ', '.join(['?' for _ in config])
+                values = list(config.values())
+                cur.execute(f'INSERT INTO configs ({columns}) VALUES ({placeholders})', values)
+            
+            # Восстанавливаем избранное
+            for fav in backup_data.get("favorites", []):
+                columns = ', '.join(fav.keys())
+                placeholders = ', '.join(['?' for _ in fav])
+                values = list(fav.values())
+                cur.execute(f'INSERT INTO favorites ({columns}) VALUES ({placeholders})', values)
+            
+            conn.commit()
+            logger.info(f"✅ База восстановлена из {filename}")
+            
+            # Восстанавливаем пользователей
+            if backup_data.get("users"):
+                conn_users = sqlite3.connect(USERS_DB_PATH)
+                cur_users = conn_users.cursor()
+                cur_users.execute('DELETE FROM users')
+                for user in backup_data["users"]:
+                    columns = ', '.join(user.keys())
+                    placeholders = ', '.join(['?' for _ in user])
+                    values = list(user.values())
+                    cur_users.execute(f'INSERT INTO users ({columns}) VALUES ({placeholders})', values)
+                conn_users.commit()
+                conn_users.close()
+            
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"❌ Ошибка при восстановлении: {e}")
+            return False
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка чтения файла бэкапа: {e}")
+        return False
+
+def list_backups():
+    """Показывает список доступных бэкапов"""
+    try:
+        files = os.listdir(BACKUP_DIR)
+        backups = [f for f in files if f.startswith('database_backup_') and f.endswith('.json')]
+        backups.sort(reverse=True)
+        return backups
+    except Exception as e:
+        logger.error(f"Ошибка получения списка бэкапов: {e}")
+        return []
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
 def safe_db(func):
@@ -536,10 +693,9 @@ class AdminStates(StatesGroup):
     # Для рассылки
     broadcast_text = State()
     broadcast_photo = State()
-
-class SearchStates(StatesGroup):
-    choosing_category = State()
-    waiting_for_query = State()
+    
+    # Для бэкапов
+    waiting_for_backup = State()
 
 # ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard(is_admin: bool = False):
@@ -547,8 +703,7 @@ def get_main_keyboard(is_admin: bool = False):
     buttons = [
         [
             types.KeyboardButton(text="🎮 Клиенты"),
-            types.KeyboardButton(text="🎨 Ресурспаки"),
-            types.KeyboardButton(text="🔍 Поиск")
+            types.KeyboardButton(text="🎨 Ресурспаки")
         ],
         [
             types.KeyboardButton(text="❤️ Избранное"),
@@ -578,7 +733,7 @@ def get_version_keyboard(versions: List[str], category: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages: int):
-    """Клавиатура со списком элементов (по 10 на страницу)"""
+    """Клавиатура со списком элементов"""
     buttons = []
     for item in items:
         item_id = item[0]
@@ -598,7 +753,6 @@ def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages
         
         preview = "🖼️" if media_list else "📄"
         
-        # Красивое оформление кнопки
         button_text = f"{preview} {name[:30]} {version_text}\n{short_desc[:50]}... 📥 {format_number(downloads)}"
         
         buttons.append([InlineKeyboardButton(
@@ -642,7 +796,7 @@ def get_admin_main_keyboard():
         [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
         [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
-        [InlineKeyboardButton(text="📦 Бэкапы", callback_data="admin_backups")],
+        [InlineKeyboardButton(text="📦 Бэкапы", callback_data="admin_backups_menu")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
     ]
@@ -662,9 +816,9 @@ def get_admin_category_keyboard(category: str):
 def get_admin_items_keyboard(items: List[Tuple], category: str, action: str):
     """Клавиатура со списком элементов для админа"""
     buttons = []
-    for item_id, name, _, _, version in items[:10]:
+    for item_id, name, short_desc, downloads, version in items[:10]:
         buttons.append([InlineKeyboardButton(
-            text=f"{item_id}. {name[:30]} ({version})", 
+            text=f"{item_id}. {name[:30]} ({version})\n{short_desc[:30]}... 📥 {downloads}", 
             callback_data=f"{action}_{category}_{item_id}"
         )])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
@@ -703,26 +857,18 @@ def get_help_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_search_category_keyboard():
-    buttons = [
-        [InlineKeyboardButton(text="🎮 Клиенты", callback_data="search_clients")],
-        [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="search_packs")],
-        [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="search_configs")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 def get_backups_keyboard():
+    """Клавиатура для бэкапов"""
     try:
-        backups = sorted(os.listdir(BACKUP_DIR), reverse=True)[:10]
+        backups = list_backups()
         buttons = []
-        for backup in backups:
+        for backup in backups[:10]:
             size = os.path.getsize(os.path.join(BACKUP_DIR, backup)) // 1024
             buttons.append([InlineKeyboardButton(
-                text=f"📦 {backup} ({size} KB)",
+                text=f"📦 {backup[:30]}... ({size} KB)",
                 callback_data=f"restore_{backup}"
             )])
-        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_backups_menu")])
         return InlineKeyboardMarkup(inline_keyboard=buttons)
     except:
         return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
@@ -741,21 +887,21 @@ async def cmd_start(message: Message):
     is_admin = (message.from_user.id == ADMIN_ID)
     save_user(message)
     await message.answer(
-        "👋 Привет! Я бот-каталог Minecraft\n\n"
+        "👋 **Привет! Я бот-каталог Minecraft**\n\n"
         "🎮 Клиенты - моды и сборки\n"
         "🎨 Ресурспаки - текстурпаки\n"
-        "🔍 Поиск - найди что хочешь\n"
         "❤️ Избранное - сохраняй понравившееся\n"
         "⚙️ Конфиги - настройки\n"
         "ℹ️ Инфо - о боте и создателе\n"
         "❓ Помощь - связаться с админом\n\n"
         "Используй кнопки ниже:",
+        parse_mode="Markdown",
         reply_markup=get_main_keyboard(is_admin)
     )
 
 # ========== КЛИЕНТЫ ==========
 @dp.message(F.text == "🎮 Клиенты")
-async def clients_menu(message: Message):
+async def clients_menu(message: Message, state: FSMContext):
     versions = get_all_client_versions()
     if not versions:
         await message.answer("📭 Пока нет клиентов")
@@ -791,7 +937,7 @@ async def clients_version_selected(callback: CallbackQuery, state: FSMContext):
 
 # ========== РЕСУРСПАКИ ==========
 @dp.message(F.text == "🎨 Ресурспаки")
-async def packs_menu(message: Message):
+async def packs_menu(message: Message, state: FSMContext):
     versions = get_all_pack_versions()
     if not versions:
         await message.answer("📭 Пока нет ресурспаков")
@@ -827,7 +973,7 @@ async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
 
 # ========== КОНФИГИ ==========
 @dp.message(F.text == "⚙️ Конфиги")
-async def configs_menu(message: Message):
+async def configs_menu(message: Message, state: FSMContext):
     versions = get_all_config_versions()
     if not versions:
         await message.answer("📭 Пока нет конфигов")
@@ -861,7 +1007,7 @@ async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== ДЕТАЛЬНЫЙ ПРОСМОТР (С ФОТО ВМЕСТЕ) ==========
+# ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
 @dp.callback_query(lambda c: c.data.startswith("detail_"))
 async def detail_view(callback: CallbackQuery, state: FSMContext):
     _, category, item_id = callback.data.split("_")
@@ -1078,45 +1224,63 @@ async def favorite_handler(callback: CallbackQuery):
     callback.data = f"detail_{category}_{item_id}"
     await detail_view(callback, None)
 
-# ========== ПОИСК ==========
-@dp.message(F.text == "🔍 Поиск")
-async def search_start(message: Message, state: FSMContext):
-    await state.set_state(SearchStates.choosing_category)
-    await message.answer(
-        "🔍 **В какой категории искать?**",
-        parse_mode="Markdown",
-        reply_markup=get_search_category_keyboard()
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("search_") and c.data not in ["search_clients", "search_packs", "search_configs"])
-async def search_category_selected(callback: CallbackQuery, state: FSMContext):
-    category = callback.data.replace("search_", "")
-    await state.update_data(search_category=category)
-    await state.set_state(SearchStates.waiting_for_query)
-    await callback.message.edit_text("🔍 **Введи поисковый запрос:**", parse_mode="Markdown")
-    await callback.answer()
-
-@dp.message(SearchStates.waiting_for_query)
-async def search_execute(message: Message, state: FSMContext):
-    await message.answer("⚠️ **Поиск временно недоступен**", parse_mode="Markdown")
-    await state.clear()
-
 # ========== ИНФО ==========
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: Message):
     users_count = get_users_count()
-    await message.answer(
-        f"**Информация о боте**\n\n"
-        f"Создатель: {CREATOR_USERNAME}\n"
-        f"Версия: 8.1\n\n"
-        f"📊 **Статистика:**\n"
-        f"• Пользователей: {users_count}\n"
-        f"• 10 элементов на страницу\n"
-        f"• Красивое оформление\n"
-        f"• Работающее удаление\n"
-        f"• Рассылка сообщений",
-        parse_mode="Markdown"
-    )
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM clients')
+        clients_count = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM resourcepacks')
+        packs_count = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM configs')
+        configs_count = cur.fetchone()[0]
+        
+        cur.execute('SELECT SUM(downloads) FROM clients')
+        clients_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM resourcepacks')
+        packs_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM configs')
+        configs_d = cur.fetchone()[0] or 0
+        
+        conn.close()
+        
+        total_downloads = clients_d + packs_d + configs_d
+        
+        await message.answer(
+            f"**Информация о боте**\n\n"
+            f"Создатель: {CREATOR_USERNAME}\n"
+            f"Версия: 9.1\n\n"
+            f"📊 **Статистика:**\n"
+            f"• Пользователей: {users_count}\n"
+            f"• Клиентов: {clients_count}\n"
+            f"• Ресурспаков: {packs_count}\n"
+            f"• Конфигов: {configs_count}\n"
+            f"• Всего скачиваний: {format_number(total_downloads)}\n\n"
+            f"• 10 элементов на страницу\n"
+            f"• Красивое оформление\n"
+            f"• Работающее удаление\n"
+            f"• Рассылка сообщений\n"
+            f"• Бэкапы в JSON",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка в info: {e}")
+        await message.answer(
+            f"**Информация о боте**\n\n"
+            f"Создатель: {CREATOR_USERNAME}\n"
+            f"Версия: 9.1\n\n"
+            f"Пользователей: {users_count}",
+            parse_mode="Markdown"
+        )
 
 # ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
@@ -1234,6 +1398,964 @@ async def admin_configs(callback: CallbackQuery):
         "⚙️ **Управление конфигами**\n\nВыбери действие:",
         parse_mode="Markdown",
         reply_markup=get_admin_category_keyboard("configs")
+    )
+    await callback.answer()
+
+# ========== АДМИН: БЭКАПЫ ==========
+@dp.callback_query(lambda c: c.data == "admin_backups_menu")
+async def admin_backups_menu(callback: CallbackQuery):
+    """Меню управления бэкапами"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    backups = list_backups()
+    
+    text = "📦 **Управление бэкапами**\n\n"
+    
+    if backups:
+        text += "**Последние бэкапы:**\n"
+        for i, backup in enumerate(backups[:10], 1):
+            size = os.path.getsize(os.path.join(BACKUP_DIR, backup)) // 1024
+            text += f"{i}. `{backup[:30]}...` ({size} KB)\n"
+    else:
+        text += "Пока нет бэкапов. Создай первый!\n"
+    
+    buttons = [
+        [InlineKeyboardButton(text="📥 Создать бэкап", callback_data="admin_backup_create")],
+        [InlineKeyboardButton(text="📤 Загрузить бэкап", callback_data="admin_backup_upload")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ]
+    
+    if backups:
+        # Кнопки для восстановления последних 3 бэкапов
+        for backup in backups[:3]:
+            buttons.insert(-1, [InlineKeyboardButton(
+                text=f"🔄 Восстановить {backup[:20]}...",
+                callback_data=f"admin_backup_restore_{backup}"
+            )])
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "admin_backup_create")
+async def admin_backup_create(callback: CallbackQuery):
+    """Создание бэкапа"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await callback.message.edit_text("⏳ **Создание бэкапа...**", parse_mode="Markdown")
+    
+    filename = await backup_database_to_json()
+    
+    if filename:
+        # Отправляем файл админу
+        await callback.message.answer_document(
+            document=FSInputFile(filename),
+            caption=f"✅ Бэкап создан: {os.path.basename(filename)}"
+        )
+        
+        # Возвращаемся в меню
+        await admin_backups_menu(callback)
+    else:
+        await callback.message.edit_text(
+            "❌ **Ошибка создания бэкапа**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_backups_menu")]
+            ])
+        )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("admin_backup_restore_"))
+async def admin_backup_restore(callback: CallbackQuery):
+    """Восстановление из бэкапа"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    filename = callback.data.replace("admin_backup_restore_", "")
+    filepath = os.path.join(BACKUP_DIR, filename)
+    
+    if not os.path.exists(filepath):
+        await callback.answer("❌ Файл не найден", show_alert=True)
+        return
+    
+    # Кнопка подтверждения
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"admin_backup_restore_confirm_{filename}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_backups_menu")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ **ВНИМАНИЕ!**\n\n"
+        f"Ты собираешься восстановить базу из файла:\n`{filename}`\n\n"
+        f"Все текущие данные будут **заменены**!\n\n"
+        f"Ты уверен?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("admin_backup_restore_confirm_"))
+async def admin_backup_restore_confirm(callback: CallbackQuery):
+    """Подтверждение восстановления"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    filename = callback.data.replace("admin_backup_restore_confirm_", "")
+    filepath = os.path.join(BACKUP_DIR, filename)
+    
+    await callback.message.edit_text("⏳ **Восстановление базы...**", parse_mode="Markdown")
+    
+    # Сначала создаём бэкап текущего состояния
+    await backup_database_to_json()
+    
+    # Восстанавливаем
+    success = await restore_database_from_json(filepath)
+    
+    if success:
+        await callback.message.edit_text(
+            "✅ **База успешно восстановлена!**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_backups_menu")]
+            ])
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ **Ошибка восстановления!**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_backups_menu")]
+            ])
+        )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "admin_backup_upload")
+async def admin_backup_upload(callback: CallbackQuery, state: FSMContext):
+    """Загрузка бэкапа с телефона"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.waiting_for_backup)
+    await callback.message.edit_text(
+        "📤 **Отправь JSON файл с бэкапом**\n\n"
+        "Файл должен быть в формате, созданном ботом.\n\n"
+        "После отправки файл будет сохранён в папку backups.",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.message(AdminStates.waiting_for_backup)
+async def handle_backup_upload(message: Message, state: FSMContext):
+    """Обработка загруженного бэкапа"""
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Доступ запрещен")
+        await state.clear()
+        return
+    
+    if not message.document:
+        await message.answer("❌ Отправь файл!")
+        return
+    
+    # Проверяем расширение
+    if not message.document.file_name.endswith('.json'):
+        await message.answer("❌ Файл должен быть в формате .json")
+        return
+    
+    # Скачиваем файл
+    file = await bot.get_file(message.document.file_id)
+    file_path = f"{BACKUP_DIR}/uploaded_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{message.document.file_name}"
+    await bot.download_file(file.file_path, file_path)
+    
+    await message.answer(
+        f"✅ Файл загружен как: `{os.path.basename(file_path)}`\n\n"
+        f"Теперь можешь восстановить его через меню бэкапов.",
+        parse_mode="Markdown"
+    )
+    await state.clear()
+
+# ========== АДМИН: ДОБАВЛЕНИЕ ==========
+@dp.callback_query(lambda c: c.data == "add_clients")
+async def add_client_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.client_name)
+    await callback.message.edit_text("📝 **Введи название клиента:**", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "add_packs")
+async def add_pack_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.pack_name)
+    await callback.message.edit_text("📝 **Введи название ресурспака:**", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "add_configs")
+async def add_config_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.config_name)
+    await callback.message.edit_text("📝 **Введи название конфига:**", parse_mode="Markdown")
+    await callback.answer()
+
+# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
+@dp.message(AdminStates.client_name)
+async def client_name(message: Message, state: FSMContext):
+    await state.update_data(client_name=message.text)
+    await state.set_state(AdminStates.client_short_desc)
+    await message.answer("📄 **Введи краткое описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.client_short_desc)
+async def client_short_desc(message: Message, state: FSMContext):
+    await state.update_data(client_short_desc=message.text)
+    await state.set_state(AdminStates.client_full_desc)
+    await message.answer("📚 **Введи полное описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.client_full_desc)
+async def client_full_desc(message: Message, state: FSMContext):
+    await state.update_data(client_full_desc=message.text)
+    await state.set_state(AdminStates.client_version)
+    await message.answer("🔢 **Введи версию** (например 1.20.4):", parse_mode="Markdown")
+
+@dp.message(AdminStates.client_version)
+async def client_version(message: Message, state: FSMContext):
+    await state.update_data(client_version=message.text)
+    await state.set_state(AdminStates.client_url)
+    await message.answer("🔗 **Введи ссылку на скачивание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.client_url)
+async def client_url(message: Message, state: FSMContext):
+    await state.update_data(client_url=message.text)
+    await state.set_state(AdminStates.client_media)
+    await message.answer(
+        "🖼️ **Отправляй фото** (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:",
+        parse_mode="Markdown"
+    )
+
+@dp.message(AdminStates.client_media)
+async def client_media(message: Message, state: FSMContext):
+    data = await state.get_data()
+    media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_client(
+            data['client_name'],
+            data['client_short_desc'],
+            data['client_full_desc'],
+            data['client_url'],
+            data['client_version'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Клиент добавлен!**\nID: `{item_id}`\nДобавлено фото: {len(media_list)}",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.text and message.text.lower() == 'пропустить':
+        item_id = add_client(
+            data['client_name'],
+            data['client_short_desc'],
+            data['client_full_desc'],
+            data['client_url'],
+            data['client_version'],
+            []
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Клиент добавлен!**\nID: `{item_id}` (без фото)",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.photo:
+        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=media_list)
+        await message.answer(
+            f"✅ **Фото добавлено!** Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "❌ **Отправь фото**, или напиши **готово** / **пропустить**",
+            parse_mode="Markdown"
+        )
+
+# ========== АДМИН: ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
+@dp.message(AdminStates.pack_name)
+async def pack_name(message: Message, state: FSMContext):
+    await state.update_data(pack_name=message.text)
+    await state.set_state(AdminStates.pack_short_desc)
+    await message.answer("📄 **Введи краткое описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.pack_short_desc)
+async def pack_short_desc(message: Message, state: FSMContext):
+    await state.update_data(pack_short_desc=message.text)
+    await state.set_state(AdminStates.pack_full_desc)
+    await message.answer("📚 **Введи полное описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.pack_full_desc)
+async def pack_full_desc(message: Message, state: FSMContext):
+    await state.update_data(pack_full_desc=message.text)
+    await state.set_state(AdminStates.pack_version)
+    await message.answer("🔢 **Введи версию** (например 1.20.4):", parse_mode="Markdown")
+
+@dp.message(AdminStates.pack_version)
+async def pack_version(message: Message, state: FSMContext):
+    await state.update_data(pack_version=message.text)
+    await state.set_state(AdminStates.pack_author)
+    await message.answer("✍️ **Введи автора:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.pack_author)
+async def pack_author(message: Message, state: FSMContext):
+    await state.update_data(pack_author=message.text)
+    await state.set_state(AdminStates.pack_url)
+    await message.answer("🔗 **Введи ссылку на скачивание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.pack_url)
+async def pack_url(message: Message, state: FSMContext):
+    await state.update_data(pack_url=message.text)
+    await state.set_state(AdminStates.pack_media)
+    await message.answer(
+        "🖼️ **Отправляй фото** (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:",
+        parse_mode="Markdown"
+    )
+
+@dp.message(AdminStates.pack_media)
+async def pack_media(message: Message, state: FSMContext):
+    data = await state.get_data()
+    media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_pack(
+            data['pack_name'],
+            data['pack_short_desc'],
+            data['pack_full_desc'],
+            data['pack_url'],
+            data['pack_version'],
+            data['pack_author'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Ресурспак добавлен!**\nID: `{item_id}`\nДобавлено фото: {len(media_list)}",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.text and message.text.lower() == 'пропустить':
+        item_id = add_pack(
+            data['pack_name'],
+            data['pack_short_desc'],
+            data['pack_full_desc'],
+            data['pack_url'],
+            data['pack_version'],
+            data['pack_author'],
+            []
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Ресурспак добавлен!**\nID: `{item_id}` (без фото)",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.photo:
+        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=media_list)
+        await message.answer(
+            f"✅ **Фото добавлено!** Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "❌ **Отправь фото**, или напиши **готово** / **пропустить**",
+            parse_mode="Markdown"
+        )
+
+# ========== АДМИН: ДОБАВЛЕНИЕ КОНФИГА ==========
+@dp.message(AdminStates.config_name)
+async def config_name(message: Message, state: FSMContext):
+    await state.update_data(config_name=message.text)
+    await state.set_state(AdminStates.config_short_desc)
+    await message.answer("📄 **Введи краткое описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.config_short_desc)
+async def config_short_desc(message: Message, state: FSMContext):
+    await state.update_data(config_short_desc=message.text)
+    await state.set_state(AdminStates.config_full_desc)
+    await message.answer("📚 **Введи полное описание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.config_full_desc)
+async def config_full_desc(message: Message, state: FSMContext):
+    await state.update_data(config_full_desc=message.text)
+    await state.set_state(AdminStates.config_version)
+    await message.answer("🔢 **Введи версию** (например 1.20.4):", parse_mode="Markdown")
+
+@dp.message(AdminStates.config_version)
+async def config_version(message: Message, state: FSMContext):
+    await state.update_data(config_version=message.text)
+    await state.set_state(AdminStates.config_url)
+    await message.answer("🔗 **Введи ссылку на скачивание:**", parse_mode="Markdown")
+
+@dp.message(AdminStates.config_url)
+async def config_url(message: Message, state: FSMContext):
+    await state.update_data(config_url=message.text)
+    await state.set_state(AdminStates.config_media)
+    await message.answer(
+        "🖼️ **Отправляй фото** (можно несколько)\n\n"
+        "После того как отправишь все фото, напиши **готово**\n"
+        "Или напиши **пропустить** если не хочешь добавлять фото:",
+        parse_mode="Markdown"
+    )
+
+@dp.message(AdminStates.config_media)
+async def config_media(message: Message, state: FSMContext):
+    data = await state.get_data()
+    media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        item_id = add_config(
+            data['config_name'],
+            data['config_short_desc'],
+            data['config_full_desc'],
+            data['config_url'],
+            data['config_version'],
+            media_list
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Конфиг добавлен!**\nID: `{item_id}`\nДобавлено фото: {len(media_list)}",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.text and message.text.lower() == 'пропустить':
+        item_id = add_config(
+            data['config_name'],
+            data['config_short_desc'],
+            data['config_full_desc'],
+            data['config_url'],
+            data['config_version'],
+            []
+        )
+        await state.clear()
+        if item_id:
+            await message.answer(
+                f"✅ **Конфиг добавлен!**\nID: `{item_id}` (без фото)",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        else:
+            await message.answer(
+                "❌ **Ошибка при добавлении**",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard(is_admin=True)
+            )
+        return
+    
+    if message.photo:
+        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=media_list)
+        await message.answer(
+            f"✅ **Фото добавлено!** Всего: {len(media_list)}\n"
+            f"Можешь отправить ещё фото или написать **готово**",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "❌ **Отправь фото**, или напиши **готово** / **пропустить**",
+            parse_mode="Markdown"
+        )
+
+# ========== АДМИН: РЕДАКТИРОВАНИЕ ==========
+@dp.callback_query(lambda c: c.data == "edit_clients")
+async def edit_clients_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("clients")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет клиентов для редактирования**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "✏️ **Выбери клиента для редактирования:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "clients", "edit_client")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "edit_packs")
+async def edit_packs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("resourcepacks")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет ресурспаков для редактирования**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "✏️ **Выбери ресурспак для редактирования:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "packs", "edit_pack")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "edit_configs")
+async def edit_configs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("configs")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет конфигов для редактирования**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "✏️ **Выбери конфиг для редактирования:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "configs", "edit_config")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_client_"))
+async def edit_client_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("edit_client_", ""))
+    await state.update_data(edit_category="clients", edit_item_id=item_id)
+    await callback.message.edit_text(
+        "✏️ **Что изменить?**",
+        parse_mode="Markdown",
+        reply_markup=get_edit_fields_keyboard("clients", item_id)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_pack_"))
+async def edit_pack_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("edit_pack_", ""))
+    await state.update_data(edit_category="packs", edit_item_id=item_id)
+    await callback.message.edit_text(
+        "✏️ **Что изменить?**",
+        parse_mode="Markdown",
+        reply_markup=get_edit_fields_keyboard("packs", item_id)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_config_"))
+async def edit_config_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("edit_config_", ""))
+    await state.update_data(edit_category="configs", edit_item_id=item_id)
+    await callback.message.edit_text(
+        "✏️ **Что изменить?**",
+        parse_mode="Markdown",
+        reply_markup=get_edit_fields_keyboard("configs", item_id)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_name_") or c.data.startswith("edit_short_") or
+                            c.data.startswith("edit_full_") or c.data.startswith("edit_version_") or
+                            c.data.startswith("edit_author_") or c.data.startswith("edit_url_"))
+async def edit_field(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    action, category, item_id = callback.data.split("_", 2)
+    
+    field_map = {
+        'edit_name': 'name',
+        'edit_short': 'short_desc',
+        'edit_full': 'full_desc',
+        'edit_version': 'version',
+        'edit_author': 'author',
+        'edit_url': 'download_url'
+    }
+    
+    field = field_map.get(action)
+    if not field:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    
+    await state.update_data(edit_field=field)
+    await state.set_state(AdminStates.edit_value)
+    await callback.message.edit_text("✏️ **Введи новое значение:**", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(AdminStates.edit_value)
+async def edit_value(message: Message, state: FSMContext):
+    data = await state.get_data()
+    category = data['edit_category']
+    item_id = data['edit_item_id']
+    field = data['edit_field']
+    
+    if category == 'clients':
+        update_client(item_id, field, message.text)
+    elif category == 'packs':
+        update_pack(item_id, field, message.text)
+    else:
+        update_config(item_id, field, message.text)
+    
+    await state.clear()
+    await message.answer(
+        "✅ **Обновлено!**",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard(is_admin=True)
+    )
+
+# ========== АДМИН: УДАЛЕНИЕ ==========
+@dp.callback_query(lambda c: c.data == "delete_clients")
+async def delete_clients_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("clients")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет клиентов для удаления**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "🗑 **Выбери клиента для удаления:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "clients", "delete_client")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "delete_packs")
+async def delete_packs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("resourcepacks")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет ресурспаков для удаления**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "🗑 **Выбери ресурспак для удаления:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "packs", "delete_pack")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "delete_configs")
+async def delete_configs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("configs")
+    if not items:
+        await callback.message.edit_text(
+            "📭 **Нет конфигов для удаления**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "🗑 **Выбери конфиг для удаления:**",
+        parse_mode="Markdown",
+        reply_markup=get_admin_items_keyboard(items, "configs", "delete_config")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_client_"))
+async def delete_client_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("delete_client_", ""))
+    
+    item = get_item("clients", item_id)
+    if item:
+        name = item[1]
+        delete_item("clients", item_id)
+        await callback.answer(f"✅ Клиент '{name}' удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Клиент не найден", show_alert=True)
+    
+    await delete_clients_list(callback)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_pack_"))
+async def delete_pack_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("delete_pack_", ""))
+    
+    item = get_item("resourcepacks", item_id)
+    if item:
+        name = item[1]
+        delete_item("resourcepacks", item_id)
+        await callback.answer(f"✅ Ресурспак '{name}' удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Ресурспак не найден", show_alert=True)
+    
+    await delete_packs_list(callback)
+
+@dp.callback_query(lambda c: c.data.startswith("delete_config_"))
+async def delete_config_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    item_id = int(callback.data.replace("delete_config_", ""))
+    
+    item = get_item("configs", item_id)
+    if item:
+        name = item[1]
+        delete_item("configs", item_id)
+        await callback.answer(f"✅ Конфиг '{name}' удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Конфиг не найден", show_alert=True)
+    
+    await delete_configs_list(callback)
+
+# ========== АДМИН: СПИСОК ==========
+@dp.callback_query(lambda c: c.data == "list_clients")
+async def list_clients(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("clients")
+    if not items:
+        text = "📭 **Список клиентов пуст**"
+    else:
+        text = "📋 **Список клиентов:**\n\n"
+        for item_id, name, short_desc, downloads, version in items:
+            text += f"`{item_id}`. **{name}** ({version})\n"
+            text += f"   _{short_desc[:50]}..._ 📥 {downloads}\n\n"
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
+        ])
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "list_packs")
+async def list_packs(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("resourcepacks")
+    if not items:
+        text = "📭 **Список ресурспаков пуст**"
+    else:
+        text = "📋 **Список ресурспаков:**\n\n"
+        for item_id, name, short_desc, downloads, version in items:
+            text += f"`{item_id}`. **{name}** ({version})\n"
+            text += f"   _{short_desc[:50]}..._ 📥 {downloads}\n\n"
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]
+        ])
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "list_configs")
+async def list_configs(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items = get_all_items("configs")
+    if not items:
+        text = "📭 **Список конфигов пуст**"
+    else:
+        text = "📋 **Список конфигов:**\n\n"
+        for item_id, name, short_desc, downloads, version in items:
+            text += f"`{item_id}`. **{name}** ({version})\n"
+            text += f"   _{short_desc[:50]}..._ 📥 {downloads}\n\n"
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]
+        ])
+    )
+    await callback.answer()
+
+# ========== АДМИН: СТАТИСТИКА ==========
+@dp.callback_query(lambda c: c.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute('SELECT COUNT(*) FROM clients')
+        clients = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM resourcepacks')
+        packs = cur.fetchone()[0]
+        
+        cur.execute('SELECT COUNT(*) FROM configs')
+        configs = cur.fetchone()[0]
+        
+        cur.execute('SELECT SUM(downloads) FROM clients')
+        clients_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM resourcepacks')
+        packs_d = cur.fetchone()[0] or 0
+        
+        cur.execute('SELECT SUM(downloads) FROM configs')
+        configs_d = cur.fetchone()[0] or 0
+        
+        conn.close()
+        
+        users_count = get_users_count()
+        backup_count = len(os.listdir(BACKUP_DIR)) if os.path.exists(BACKUP_DIR) else 0
+        backup_size = sum(os.path.getsize(os.path.join(BACKUP_DIR, f)) for f in os.listdir(BACKUP_DIR)) // 1024 if backup_count > 0 else 0
+        
+        text = (f"📊 **Статистика**\n\n"
+                f"👤 Пользователей: {users_count}\n"
+                f"🎮 Клиенты: {clients}\n"
+                f"🎨 Ресурспаки: {packs}\n"
+                f"⚙️ Конфиги: {configs}\n"
+                f"📥 Всего скачиваний: {format_number(clients_d + packs_d + configs_d)}\n\n"
+                f"📦 Бэкапов: {backup_count} ({backup_size} KB)")
+    except Exception as e:
+        text = f"📊 **Статистика**\n\nОшибка получения данных: {e}"
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+        ])
     )
     await callback.answer()
 
@@ -1356,370 +2478,7 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
-@dp.callback_query(lambda c: c.data == "add_clients")
-async def add_client_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    await state.set_state(AdminStates.client_name)
-    await callback.message.edit_text("📝 **Введи название клиента:**", parse_mode="Markdown")
-    await callback.answer()
-
-@dp.message(AdminStates.client_name)
-async def client_name(message: Message, state: FSMContext):
-    await state.update_data(client_name=message.text)
-    await state.set_state(AdminStates.client_short_desc)
-    await message.answer("📄 **Введи краткое описание:**", parse_mode="Markdown")
-
-@dp.message(AdminStates.client_short_desc)
-async def client_short_desc(message: Message, state: FSMContext):
-    await state.update_data(client_short_desc=message.text)
-    await state.set_state(AdminStates.client_full_desc)
-    await message.answer("📚 **Введи полное описание:**", parse_mode="Markdown")
-
-@dp.message(AdminStates.client_full_desc)
-async def client_full_desc(message: Message, state: FSMContext):
-    await state.update_data(client_full_desc=message.text)
-    await state.set_state(AdminStates.client_version)
-    await message.answer("🔢 **Введи версию** (например 1.20.4):", parse_mode="Markdown")
-
-@dp.message(AdminStates.client_version)
-async def client_version(message: Message, state: FSMContext):
-    await state.update_data(client_version=message.text)
-    await state.set_state(AdminStates.client_url)
-    await message.answer("🔗 **Введи ссылку на скачивание:**", parse_mode="Markdown")
-
-@dp.message(AdminStates.client_url)
-async def client_url(message: Message, state: FSMContext):
-    await state.update_data(client_url=message.text)
-    await state.set_state(AdminStates.client_media)
-    await message.answer(
-        "🖼️ **Отправляй фото** (можно несколько)\n\n"
-        "После того как отправишь все фото, напиши **готово**\n"
-        "Или напиши **пропустить** если не хочешь добавлять фото:",
-        parse_mode="Markdown"
-    )
-
-@dp.message(AdminStates.client_media)
-async def client_media(message: Message, state: FSMContext):
-    data = await state.get_data()
-    media_list = data.get('media_list', [])
-    
-    if message.text and message.text.lower() == 'готово':
-        item_id = add_client(
-            data['client_name'],
-            data['client_short_desc'],
-            data['client_full_desc'],
-            data['client_url'],
-            data['client_version'],
-            media_list
-        )
-        await state.clear()
-        if item_id:
-            await message.answer(
-                f"✅ **Клиент добавлен!**\nID: `{item_id}`\nДобавлено фото: {len(media_list)}",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard(is_admin=True)
-            )
-        else:
-            await message.answer(
-                "❌ **Ошибка при добавлении**",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard(is_admin=True)
-            )
-        return
-    
-    if message.text and message.text.lower() == 'пропустить':
-        item_id = add_client(
-            data['client_name'],
-            data['client_short_desc'],
-            data['client_full_desc'],
-            data['client_url'],
-            data['client_version'],
-            []
-        )
-        await state.clear()
-        if item_id:
-            await message.answer(
-                f"✅ **Клиент добавлен!**\nID: `{item_id}` (без фото)",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard(is_admin=True)
-            )
-        else:
-            await message.answer(
-                "❌ **Ошибка при добавлении**",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard(is_admin=True)
-            )
-        return
-    
-    if message.photo:
-        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
-        await state.update_data(media_list=media_list)
-        await message.answer(
-            f"✅ **Фото добавлено!** Всего: {len(media_list)}\n"
-            f"Можешь отправить ещё фото или написать **готово**",
-            parse_mode="Markdown"
-        )
-    else:
-        await message.answer(
-            "❌ **Отправь фото**, или напиши **готово** / **пропустить**",
-            parse_mode="Markdown"
-        )
-
-# ========== АДМИН: РЕДАКТИРОВАНИЕ ==========
-@dp.callback_query(lambda c: c.data == "edit_clients")
-async def edit_clients_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    items = get_all_items("clients")
-    if not items:
-        await callback.message.edit_text(
-            "📭 **Нет клиентов для редактирования**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
-            ])
-        )
-        await callback.answer()
-        return
-    
-    await callback.message.edit_text(
-        "✏️ **Выбери клиента для редактирования:**",
-        parse_mode="Markdown",
-        reply_markup=get_admin_items_keyboard(items, "clients", "edit_client")
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("edit_client_"))
-async def edit_client_select(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    item_id = int(callback.data.replace("edit_client_", ""))
-    await state.update_data(edit_category="clients", edit_item_id=item_id)
-    await callback.message.edit_text(
-        "✏️ **Что изменить?**",
-        parse_mode="Markdown",
-        reply_markup=get_edit_fields_keyboard("clients", item_id)
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("edit_name_") or c.data.startswith("edit_short_") or
-                            c.data.startswith("edit_full_") or c.data.startswith("edit_version_") or
-                            c.data.startswith("edit_url_"))
-async def edit_field(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    action, category, item_id = callback.data.split("_", 2)
-    
-    field_map = {
-        'edit_name': 'name',
-        'edit_short': 'short_desc',
-        'edit_full': 'full_desc',
-        'edit_version': 'version',
-        'edit_url': 'download_url'
-    }
-    
-    field = field_map.get(action)
-    if not field:
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-    
-    await state.update_data(edit_field=field)
-    await state.set_state(AdminStates.edit_value)
-    await callback.message.edit_text("✏️ **Введи новое значение:**", parse_mode="Markdown")
-    await callback.answer()
-
-@dp.message(AdminStates.edit_value)
-async def edit_value(message: Message, state: FSMContext):
-    data = await state.get_data()
-    category = data['edit_category']
-    item_id = data['edit_item_id']
-    field = data['edit_field']
-    
-    update_client(item_id, field, message.text)
-    
-    await state.clear()
-    await message.answer(
-        "✅ **Обновлено!**",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard(is_admin=True)
-    )
-
-# ========== АДМИН: УДАЛЕНИЕ ==========
-@dp.callback_query(lambda c: c.data == "delete_clients")
-async def delete_clients_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    items = get_all_items("clients")
-    if not items:
-        await callback.message.edit_text(
-            "📭 **Нет клиентов для удаления**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
-            ])
-        )
-        await callback.answer()
-        return
-    
-    await callback.message.edit_text(
-        "🗑 **Выбери клиента для удаления:**",
-        parse_mode="Markdown",
-        reply_markup=get_admin_items_keyboard(items, "clients", "delete_client")
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("delete_client_"))
-async def delete_client_confirm(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    item_id = int(callback.data.replace("delete_client_", ""))
-    
-    item = get_item("clients", item_id)
-    if item:
-        name = item[1]
-        delete_item("clients", item_id)
-        await callback.answer(f"✅ Клиент '{name}' удалён!", show_alert=True)
-    else:
-        await callback.answer("❌ Клиент не найден", show_alert=True)
-    
-    await delete_clients_list(callback)
-
-# ========== АДМИН: СПИСОК ==========
-@dp.callback_query(lambda c: c.data == "list_clients")
-async def list_clients(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    items = get_all_items("clients")
-    if not items:
-        text = "📭 **Список клиентов пуст**"
-    else:
-        text = "📋 **Список клиентов:**\n\n"
-        for item_id, name, short_desc, downloads, version in items:
-            text += f"`{item_id}`. **{name}** ({version})\n"
-            text += f"   _{short_desc[:50]}..._ 📥 {downloads}\n\n"
-    
-    await callback.message.edit_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]
-        ])
-    )
-    await callback.answer()
-
-# ========== АДМИН: АНАЛОГИЧНО ДЛЯ PACKS И CONFIGS (можно добавить позже) ==========
-
-# ========== БЭКАПЫ ==========
-@dp.callback_query(lambda c: c.data == "admin_backups")
-async def admin_backups(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    backup_path = backup_db("manual")
-    
-    text = "📦 **Управление бэкапами**\n\n"
-    if backup_path:
-        text += "✅ Новый бэкап создан!\n\n"
-    text += "Последние бэкапы:"
-    
-    await callback.message.edit_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=get_backups_keyboard()
-    )
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("restore_"))
-async def restore_backup(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    backup_name = callback.data.replace("restore_", "")
-    backup_path = os.path.join(BACKUP_DIR, backup_name)
-    
-    if not os.path.exists(backup_path):
-        await callback.answer("❌ Бэкап не найден", show_alert=True)
-        return
-    
-    backup_db("before_restore")
-    shutil.copy2(backup_path, DB_PATH)
-    
-    await callback.answer("✅ База данных восстановлена!", show_alert=True)
-    await admin_back(callback)
-
-# ========== СТАТИСТИКА ==========
-@dp.callback_query(lambda c: c.data == "admin_stats")
-async def admin_stats(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        
-        cur.execute('SELECT COUNT(*) FROM clients')
-        clients = cur.fetchone()[0]
-        
-        cur.execute('SELECT COUNT(*) FROM resourcepacks')
-        packs = cur.fetchone()[0]
-        
-        cur.execute('SELECT COUNT(*) FROM configs')
-        configs = cur.fetchone()[0]
-        
-        cur.execute('SELECT SUM(downloads) FROM clients')
-        clients_d = cur.fetchone()[0] or 0
-        
-        cur.execute('SELECT SUM(downloads) FROM resourcepacks')
-        packs_d = cur.fetchone()[0] or 0
-        
-        cur.execute('SELECT SUM(downloads) FROM configs')
-        configs_d = cur.fetchone()[0] or 0
-        
-        conn.close()
-        
-        users_count = get_users_count()
-        backup_count = len(os.listdir(BACKUP_DIR)) if os.path.exists(BACKUP_DIR) else 0
-        backup_size = sum(os.path.getsize(os.path.join(BACKUP_DIR, f)) for f in os.listdir(BACKUP_DIR)) // 1024 if backup_count > 0 else 0
-        
-        text = (f"📊 **Статистика**\n\n"
-                f"👤 Пользователей: {users_count}\n"
-                f"🎮 Клиенты: {clients}\n"
-                f"🎨 Ресурспаки: {packs}\n"
-                f"⚙️ Конфиги: {configs}\n"
-                f"📥 Всего скачиваний: {format_number(clients_d + packs_d + configs_d)}\n\n"
-                f"📦 Бэкапов: {backup_count} ({backup_size} KB)")
-    except Exception as e:
-        text = f"📊 **Статистика**\n\nОшибка получения данных: {e}"
-    
-    await callback.message.edit_text(
-        text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
-        ])
-    )
-    await callback.answer()
-
-# ========== МЕДИА (ИСПРАВЛЕНО) ==========
+# ========== МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     try:
@@ -1862,10 +2621,10 @@ async def main():
     print("📌 Функции:")
     print("   • 10 элементов на страницу")
     print("   • Красивое оформление с картинками")
-    print("   • Работающее удаление")
+    print("   • Работающее удаление для всех категорий")
     print("   • Полная админ-панель")
     print("   • Рассылка сообщений")
-    print("   • Исправлен просмотр медиа")
+    print("   • Бэкапы в JSON")
     print("="*50)
     await dp.start_polling(bot)
 
