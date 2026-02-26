@@ -6,6 +6,7 @@ import sqlite3
 import random
 import shutil
 import zipfile
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from aiogram import Bot, Dispatcher, types, F
@@ -30,28 +31,28 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# ========== БАЗА ДАННЫХ ==========
-DB_PATH = 'clients.db'
-BACKUP_DIR = 'backups'
-USERS_DB_PATH = 'users.db'
-PERMANENT_BACKUP_DIR = './persistent_backups'
+# ========== НАСТРОЙКА ПУТЕЙ (СОГЛАСНО ИНСТРУКЦИИ BOTHOST) ==========
+# Используем папку /app/data для постоянного хранения
+DATA_DIR = Path("/app/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Создаём все необходимые папки
-os.makedirs(BACKUP_DIR, exist_ok=True)
-os.makedirs(PERMANENT_BACKUP_DIR, exist_ok=True)
+# Пути к базам данных в постоянной папке
+DB_PATH = DATA_DIR / "clients.db"
+USERS_DB_PATH = DATA_DIR / "users.db"
 
+# Папка для бэкапов тоже в постоянном хранилище
+BACKUP_DIR = DATA_DIR / "backups"
+BACKUP_DIR.mkdir(exist_ok=True)
+
+print(f"📁 Папка для данных: {DATA_DIR}")
+print(f"📁 Папка для бэкапов: {BACKUP_DIR}")
+print(f"📄 База данных клиентов: {DB_PATH}")
+print(f"📄 База данных пользователей: {USERS_DB_PATH}")
+
+# ========== ИНИЦИАЛИЗАЦИЯ БАЗ ДАННЫХ ==========
 def init_db():
-    """Создание базы данных"""
-    if os.path.exists(DB_PATH):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.close()
-            print("✅ База данных существует")
-        except:
-            print("⚠️ База данных повреждена, удаляем...")
-            os.remove(DB_PATH)
-    
-    conn = sqlite3.connect(DB_PATH)
+    """Создание базы данных клиентов, если её нет"""
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
     # Клиенты
@@ -116,11 +117,11 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ База данных готова")
+    print(f"✅ База данных клиентов инициализирована: {DB_PATH}")
 
 def init_users_db():
-    """Создание базы данных пользователей"""
-    conn = sqlite3.connect(USERS_DB_PATH)
+    """Создание базы данных пользователей, если её нет"""
+    conn = sqlite3.connect(str(USERS_DB_PATH))
     cur = conn.cursor()
     
     cur.execute('''
@@ -136,24 +137,17 @@ def init_users_db():
     
     conn.commit()
     conn.close()
-    print("✅ База данных пользователей готова")
+    print(f"✅ База данных пользователей инициализирована: {USERS_DB_PATH}")
 
-# Инициализация
-try:
-    init_db()
-    init_users_db()
-except Exception as e:
-    print(f"❌ Ошибка: {e}")
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-    init_db()
-    init_users_db()
+# Инициализация баз при запуске
+init_db()
+init_users_db()
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ ==========
 def save_user(message: Message):
     """Сохранить или обновить информацию о пользователе"""
     try:
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
         user_id = message.from_user.id
@@ -174,7 +168,7 @@ def save_user(message: Message):
 def get_all_users():
     """Получить список всех пользователей"""
     try:
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         cur.execute('SELECT user_id FROM users ORDER BY last_active DESC')
         users = cur.fetchall()
@@ -187,7 +181,7 @@ def get_all_users():
 def get_users_count():
     """Получить количество пользователей"""
     try:
-        conn = sqlite3.connect(USERS_DB_PATH)
+        conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         cur.execute('SELECT COUNT(*) FROM users')
         count = cur.fetchone()[0]
@@ -199,9 +193,9 @@ def get_users_count():
 
 # ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
 def get_all_backups():
-    """Получает ВСЕ ZIP файлы из постоянной папки"""
+    """Получает ВСЕ ZIP файлы из папки бэкапов"""
     try:
-        files = os.listdir(PERMANENT_BACKUP_DIR)
+        files = os.listdir(str(BACKUP_DIR))
         backups = [f for f in files if f.endswith('.zip')]
         backups.sort(reverse=True)
         return backups
@@ -210,16 +204,16 @@ def get_all_backups():
         return []
 
 async def create_zip_backup():
-    """Создаёт ZIP бэкап и сохраняет в постоянную папку"""
+    """Создаёт ZIP бэкап и сохраняет в папку бэкапов"""
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         zip_filename = f"backup_{timestamp}.zip"
-        zip_path = os.path.join(PERMANENT_BACKUP_DIR, zip_filename)
+        zip_path = BACKUP_DIR / zip_filename
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.exists(DB_PATH):
+            if DB_PATH.exists():
                 zipf.write(DB_PATH, 'clients.db')
-            if os.path.exists(USERS_DB_PATH):
+            if USERS_DB_PATH.exists():
                 zipf.write(USERS_DB_PATH, 'users.db')
             
             # Добавляем информационный файл
@@ -229,14 +223,14 @@ async def create_zip_backup():
 - clients.db - основная база данных
 - users.db - база пользователей
 """
-            info_path = os.path.join(BACKUP_DIR, "README.txt")
+            info_path = BACKUP_DIR / "README.txt"
             with open(info_path, 'w', encoding='utf-8') as f:
                 f.write(info_content)
             zipf.write(info_path, "README.txt")
-            os.remove(info_path)
+            info_path.unlink()  # удаляем временный файл
         
-        if os.path.exists(zip_path):
-            return zip_path, zip_filename
+        if zip_path.exists():
+            return str(zip_path), zip_filename
         return None, None
     except Exception as e:
         logger.error(f"Ошибка создания бэкапа: {e}")
@@ -253,8 +247,8 @@ async def restore_from_zip(zip_path: str):
             return False
         
         # Создаём временную папку для распаковки
-        extract_dir = os.path.join(BACKUP_DIR, f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-        os.makedirs(extract_dir, exist_ok=True)
+        extract_dir = BACKUP_DIR / f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
         print(f"📁 Временная папка: {extract_dir}")
         
         # Распаковываем ZIP
@@ -289,8 +283,8 @@ async def restore_from_zip(zip_path: str):
             try:
                 if 'clients' in filename or filename == 'clients.db':
                     # Сначала создаём бэкап старого файла
-                    if os.path.exists(DB_PATH):
-                        backup_path = os.path.join(BACKUP_DIR, f"clients_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+                    if DB_PATH.exists():
+                        backup_path = BACKUP_DIR / f"clients_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
                         shutil.copy2(DB_PATH, backup_path)
                         print(f"📦 Создан бэкап старого clients.db: {backup_path}")
                     
@@ -299,8 +293,8 @@ async def restore_from_zip(zip_path: str):
                     restored_count += 1
                     
                 elif 'users' in filename or filename == 'users.db':
-                    if os.path.exists(USERS_DB_PATH):
-                        backup_path = os.path.join(BACKUP_DIR, f"users_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+                    if USERS_DB_PATH.exists():
+                        backup_path = BACKUP_DIR / f"users_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
                         shutil.copy2(USERS_DB_PATH, backup_path)
                         print(f"📦 Создан бэкап старого users.db: {backup_path}")
                     
@@ -334,7 +328,7 @@ def safe_db(func):
 
 @safe_db
 def get_item(table: str, item_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'SELECT * FROM {table} WHERE id = ?', (item_id,))
     item = cur.fetchone()
@@ -343,7 +337,7 @@ def get_item(table: str, item_id: int):
 
 @safe_db
 def get_all_items(table: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'SELECT id, name, short_desc, media, downloads, version FROM {table} ORDER BY created_at DESC')
     items = cur.fetchall()
@@ -352,7 +346,7 @@ def get_all_items(table: str):
 
 @safe_db
 def delete_item(table: str, item_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'DELETE FROM {table} WHERE id = ?', (item_id,))
     conn.commit()
@@ -361,7 +355,7 @@ def delete_item(table: str, item_id: int):
 # ========== ФУНКЦИИ ДЛЯ КЛИЕНТОВ ==========
 def add_client(name: str, short_desc: str, full_desc: str, url: str, version: str, media: List[Dict] = None):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
@@ -378,7 +372,7 @@ def add_client(name: str, short_desc: str, full_desc: str, url: str, version: st
 
 @safe_db
 def update_client(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
     conn.commit()
@@ -387,7 +381,7 @@ def update_client(item_id: int, field: str, value: str):
 @safe_db
 def get_clients_by_version(version: str, page: int = 1, per_page: int = 10):
     """Получить клиентов по версии"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
     offset = (page - 1) * per_page
@@ -409,7 +403,7 @@ def get_clients_by_version(version: str, page: int = 1, per_page: int = 10):
 @safe_db
 def get_all_client_versions():
     """Получить все доступные версии клиентов"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL ORDER BY version DESC')
     versions = [v[0] for v in cur.fetchall()]
@@ -419,7 +413,7 @@ def get_all_client_versions():
 # ========== ФУНКЦИИ ДЛЯ РЕСУРСПАКОВ ==========
 def add_pack(name: str, short_desc: str, full_desc: str, url: str, version: str, author: str, media: List[Dict] = None):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
@@ -436,7 +430,7 @@ def add_pack(name: str, short_desc: str, full_desc: str, url: str, version: str,
 
 @safe_db
 def update_pack(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
     conn.commit()
@@ -445,7 +439,7 @@ def update_pack(item_id: int, field: str, value: str):
 @safe_db
 def get_packs_by_version(version: str, page: int = 1, per_page: int = 10):
     """Получить ресурспаки по версии"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
     offset = (page - 1) * per_page
@@ -468,7 +462,7 @@ def get_packs_by_version(version: str, page: int = 1, per_page: int = 10):
 @safe_db
 def get_all_pack_versions():
     """Получить все доступные версии ресурспаков"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute('SELECT DISTINCT version FROM resourcepacks WHERE version IS NOT NULL ORDER BY version DESC')
     versions = [v[0] for v in cur.fetchall()]
@@ -478,7 +472,7 @@ def get_all_pack_versions():
 # ========== ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
 def add_config(name: str, short_desc: str, full_desc: str, url: str, version: str, media: List[Dict] = None):
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
@@ -495,7 +489,7 @@ def add_config(name: str, short_desc: str, full_desc: str, url: str, version: st
 
 @safe_db
 def update_config(item_id: int, field: str, value: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
     conn.commit()
@@ -504,7 +498,7 @@ def update_config(item_id: int, field: str, value: str):
 @safe_db
 def get_configs_by_version(version: str, page: int = 1, per_page: int = 10):
     """Получить конфиги по версии"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
     offset = (page - 1) * per_page
@@ -526,7 +520,7 @@ def get_configs_by_version(version: str, page: int = 1, per_page: int = 10):
 @safe_db
 def get_all_config_versions():
     """Получить все доступные версии конфигов"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute('SELECT DISTINCT version FROM configs WHERE version IS NOT NULL ORDER BY version DESC')
     versions = [v[0] for v in cur.fetchall()]
@@ -536,7 +530,7 @@ def get_all_config_versions():
 # ========== ОБЩИЕ ФУНКЦИИ ==========
 @safe_db
 def increment_view(table: str, item_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'UPDATE {table} SET views = views + 1 WHERE id = ?', (item_id,))
     conn.commit()
@@ -544,7 +538,7 @@ def increment_view(table: str, item_id: int):
 
 @safe_db
 def increment_download(table: str, item_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'UPDATE {table} SET downloads = downloads + 1 WHERE id = ?', (item_id,))
     conn.commit()
@@ -552,7 +546,7 @@ def increment_download(table: str, item_id: int):
 
 @safe_db
 def toggle_favorite(user_id: int, pack_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
     cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
@@ -573,7 +567,7 @@ def toggle_favorite(user_id: int, pack_id: int) -> bool:
 
 @safe_db
 def get_favorites(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute('''
         SELECT r.id, r.name, r.short_desc, r.media, r.downloads, r.likes 
@@ -955,7 +949,7 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     elif category == "packs":
         media_list = json.loads(item[4]) if item[4] else []
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         cur.execute('SELECT * FROM favorites WHERE user_id = ? AND pack_id = ?', 
                    (callback.from_user.id, item_id))
@@ -1138,7 +1132,7 @@ async def info(message: Message):
     users_count = get_users_count()
     
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
         cur.execute('SELECT COUNT(*) FROM clients')
@@ -1167,7 +1161,7 @@ async def info(message: Message):
         await message.answer(
             f"**Информация о боте**\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 10.0 (ZIP бэкапы)\n\n"
+            f"Версия: 11.0 (постоянное хранилище)\n\n"
             f"📊 **Статистика:**\n"
             f"• Пользователей: {users_count}\n"
             f"• Клиентов: {clients_count}\n"
@@ -1175,7 +1169,8 @@ async def info(message: Message):
             f"• Конфигов: {configs_count}\n"
             f"• Всего скачиваний: {format_number(total_downloads)}\n"
             f"• ZIP бэкапов: {backup_count}\n\n"
-            f"📦 Бэкапы можно скачать в админ-панели",
+            f"📁 Данные хранятся в `/app/data`\n"
+            f"✅ Не пропадают при обновлении",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -1183,7 +1178,7 @@ async def info(message: Message):
         await message.answer(
             f"**Информация о боте**\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 10.0",
+            f"Версия: 11.0",
             parse_mode="Markdown"
         )
 
@@ -1319,13 +1314,13 @@ async def admin_zip_backups(callback: CallbackQuery):
     backups = get_all_backups()
     
     text = "📦 **ZIP Бэкапы**\n\n"
-    text += f"📁 **Папка:** `{PERMANENT_BACKUP_DIR}`\n"
+    text += f"📁 **Папка:** `{BACKUP_DIR}`\n"
     text += f"📊 **Всего бэкапов:** {len(backups)}\n\n"
     
     if backups:
         text += "**Доступные бэкапы:**\n"
         for i, backup in enumerate(backups[:10], 1):
-            size = os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, backup)) // 1024
+            size = (BACKUP_DIR / backup).stat().st_size // 1024
             if backup.startswith('backup_'):
                 emoji = "📦"
             elif backup.startswith('uploaded_'):
@@ -1378,8 +1373,8 @@ async def zip_backup_create(callback: CallbackQuery):
     
     zip_path, zip_filename = await create_zip_backup()
     
-    if zip_path and os.path.exists(zip_path):
-        size = os.path.getsize(zip_path) // 1024
+    if zip_path and Path(zip_path).exists():
+        size = Path(zip_path).stat().st_size // 1024
         
         await callback.message.answer_document(
             document=FSInputFile(zip_path),
@@ -1401,20 +1396,15 @@ async def zip_restore(callback: CallbackQuery):
         return
     
     filename = callback.data.replace("zip_restore_", "")
-    filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
+    filepath = BACKUP_DIR / filename
     
     # Проверяем существование файла
-    if not os.path.exists(filepath):
-        # Пробуем найти в других папках
-        alt_path = os.path.join(BACKUP_DIR, filename)
-        if os.path.exists(alt_path):
-            filepath = alt_path
-        else:
-            await callback.answer("❌ Файл не найден", show_alert=True)
-            return
+    if not filepath.exists():
+        await callback.answer("❌ Файл не найден", show_alert=True)
+        return
     
     # Получаем размер файла для информации
-    file_size = os.path.getsize(filepath) // 1024
+    file_size = filepath.stat().st_size // 1024
     
     # Кнопка подтверждения
     buttons = [
@@ -1442,13 +1432,9 @@ async def zip_restore_confirm(callback: CallbackQuery):
         return
     
     filename = callback.data.replace("zip_restore_confirm_", "")
+    filepath = BACKUP_DIR / filename
     
-    # Ищем файл в разных папках
-    filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
-    if not os.path.exists(filepath):
-        filepath = os.path.join(BACKUP_DIR, filename)
-    
-    if not os.path.exists(filepath):
+    if not filepath.exists():
         await callback.message.edit_text(
             "❌ **Файл не найден!**",
             parse_mode="Markdown",
@@ -1470,7 +1456,7 @@ async def zip_restore_confirm(callback: CallbackQuery):
     await create_zip_backup()
     
     # Восстанавливаем
-    success = await restore_from_zip(filepath)
+    success = await restore_from_zip(str(filepath))
     
     if success:
         await callback.message.edit_text(
@@ -1534,16 +1520,16 @@ async def handle_zip_upload(message: Message, state: FSMContext):
     else:
         new_filename = f"uploaded_{timestamp}_{original_name}"
     
-    file_path = os.path.join(PERMANENT_BACKUP_DIR, new_filename)
-    await bot.download_file(file.file_path, file_path)
+    file_path = BACKUP_DIR / new_filename
+    await bot.download_file(file.file_path, str(file_path))
     
-    if os.path.exists(file_path):
-        file_size = os.path.getsize(file_path) // 1024
+    if file_path.exists():
+        file_size = file_path.stat().st_size // 1024
         await message.answer(
             f"✅ **ZIP файл успешно загружен!**\n\n"
             f"📁 Имя: `{new_filename}`\n"
             f"📊 Размер: {file_size} KB\n"
-            f"📍 Папка: `{PERMANENT_BACKUP_DIR}`\n\n"
+            f"📍 Папка: `{BACKUP_DIR}`\n\n"
             f"Теперь файл появится в меню бэкапов.\n"
             f"Нажми **'📦 ZIP Бэкапы'** чтобы увидеть его.",
             parse_mode="Markdown"
@@ -1554,7 +1540,7 @@ async def handle_zip_upload(message: Message, state: FSMContext):
         if all_backups:
             list_text = "**Все доступные бэкапы:**\n"
             for i, b in enumerate(all_backups[:5], 1):
-                size = os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, b)) // 1024
+                size = (BACKUP_DIR / b).stat().st_size // 1024
                 list_text += f"{i}. `{b[:30]}...` ({size} KB)\n"
             await message.answer(list_text, parse_mode="Markdown")
     else:
@@ -2291,7 +2277,7 @@ async def admin_stats(callback: CallbackQuery):
         return
     
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
         cur.execute('SELECT COUNT(*) FROM clients')
@@ -2316,7 +2302,7 @@ async def admin_stats(callback: CallbackQuery):
         
         users_count = get_users_count()
         backup_count = len(get_all_backups())
-        backup_size = sum(os.path.getsize(os.path.join(PERMANENT_BACKUP_DIR, f)) for f in get_all_backups()) // 1024 if backup_count > 0 else 0
+        backup_size = sum((BACKUP_DIR / f).stat().st_size for f in get_all_backups()) // 1024 if backup_count > 0 else 0
         
         text = (f"📊 **Статистика**\n\n"
                 f"👤 Пользователей: {users_count}\n"
@@ -2595,7 +2581,8 @@ async def main():
     print("✅ Бот запущен!")
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👤 Создатель: {CREATOR_USERNAME}")
-    print(f"📁 Папка бэкапов: {PERMANENT_BACKUP_DIR}")
+    print(f"📁 Папка для данных: {DATA_DIR}")
+    print(f"📁 Папка для бэкапов: {BACKUP_DIR}")
     print("="*50)
     print("📌 Функции:")
     print("   • 10 элементов на страницу")
@@ -2603,7 +2590,8 @@ async def main():
     print("   • Работающее удаление для всех категорий")
     print("   • Полная админ-панель")
     print("   • Рассылка сообщений")
-    print("   • 📦 ZIP бэкапы (все файлы видны!)")
+    print("   • 📦 ZIP бэкапы")
+    print("   • ✅ Данные в /app/data (не пропадают)")
     print("="*50)
     await dp.start_polling(bot)
 
