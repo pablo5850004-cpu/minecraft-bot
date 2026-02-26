@@ -245,28 +245,81 @@ async def create_zip_backup():
 async def restore_from_zip(zip_path: str):
     """Восстанавливает базу из ZIP архива"""
     try:
-        extract_dir = os.path.join(BACKUP_DIR, "restore_temp")
-        os.makedirs(extract_dir, exist_ok=True)
+        print(f"🔍 Начинаем восстановление из файла: {zip_path}")
         
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            zipf.extractall(extract_dir)
+        # Проверяем, существует ли файл
+        if not os.path.exists(zip_path):
+            print(f"❌ Файл не существует: {zip_path}")
+            return False
+        
+        # Создаём временную папку для распаковки
+        extract_dir = os.path.join(BACKUP_DIR, f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        os.makedirs(extract_dir, exist_ok=True)
+        print(f"📁 Временная папка: {extract_dir}")
+        
+        # Распаковываем ZIP
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zipf:
+                # Смотрим, что внутри
+                file_list = zipf.namelist()
+                print(f"📦 Файлы в ZIP: {file_list}")
+                zipf.extractall(extract_dir)
+        except Exception as e:
+            print(f"❌ Ошибка распаковки ZIP: {e}")
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            return False
         
         # Ищем .db файлы
-        restored = False
-        for file in os.listdir(extract_dir):
-            if file.endswith('.db'):
-                src = os.path.join(extract_dir, file)
-                if file == 'clients.db' or file.endswith('clients.db'):
-                    shutil.copy2(src, DB_PATH)
-                    restored = True
-                elif file == 'users.db' or file.endswith('users.db'):
-                    shutil.copy2(src, USERS_DB_PATH)
-                    restored = True
+        db_files = []
+        for root, dirs, files in os.walk(extract_dir):
+            for file in files:
+                if file.endswith('.db'):
+                    full_path = os.path.join(root, file)
+                    db_files.append((file, full_path))
+                    print(f"✅ Найден .db файл: {file} ({os.path.getsize(full_path)} bytes)")
         
-        shutil.rmtree(extract_dir)
-        return restored
+        if not db_files:
+            print("❌ В ZIP нет .db файлов")
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            return False
+        
+        # Восстанавливаем файлы
+        restored_count = 0
+        for filename, filepath in db_files:
+            try:
+                if 'clients' in filename or filename == 'clients.db':
+                    # Сначала создаём бэкап старого файла
+                    if os.path.exists(DB_PATH):
+                        backup_path = os.path.join(BACKUP_DIR, f"clients_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+                        shutil.copy2(DB_PATH, backup_path)
+                        print(f"📦 Создан бэкап старого clients.db: {backup_path}")
+                    
+                    shutil.copy2(filepath, DB_PATH)
+                    print(f"✅ Восстановлен clients.db из {filename}")
+                    restored_count += 1
+                    
+                elif 'users' in filename or filename == 'users.db':
+                    if os.path.exists(USERS_DB_PATH):
+                        backup_path = os.path.join(BACKUP_DIR, f"users_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+                        shutil.copy2(USERS_DB_PATH, backup_path)
+                        print(f"📦 Создан бэкап старого users.db: {backup_path}")
+                    
+                    shutil.copy2(filepath, USERS_DB_PATH)
+                    print(f"✅ Восстановлен users.db из {filename}")
+                    restored_count += 1
+            except Exception as e:
+                print(f"❌ Ошибка при копировании {filename}: {e}")
+        
+        # Удаляем временную папку
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        print(f"✅ Восстановление завершено. Восстановлено файлов: {restored_count}")
+        
+        return restored_count > 0
+        
     except Exception as e:
-        logger.error(f"Ошибка восстановления: {e}")
+        print(f"❌ Критическая ошибка восстановления: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
@@ -548,7 +601,6 @@ def get_version_display(version: str) -> str:
 
 # ========== СОСТОЯНИЯ ==========
 class AdminStates(StatesGroup):
-    # Для клиентов
     client_name = State()
     client_short_desc = State()
     client_full_desc = State()
@@ -556,7 +608,6 @@ class AdminStates(StatesGroup):
     client_url = State()
     client_media = State()
     
-    # Для ресурспаков
     pack_name = State()
     pack_short_desc = State()
     pack_full_desc = State()
@@ -565,7 +616,6 @@ class AdminStates(StatesGroup):
     pack_url = State()
     pack_media = State()
     
-    # Для конфигов
     config_name = State()
     config_short_desc = State()
     config_full_desc = State()
@@ -573,22 +623,18 @@ class AdminStates(StatesGroup):
     config_url = State()
     config_media = State()
     
-    # Для редактирования
     edit_field = State()
     edit_value = State()
     edit_category = State()
     edit_item_id = State()
     
-    # Для рассылки
     broadcast_text = State()
     broadcast_photo = State()
     
-    # Для бэкапов
     waiting_for_backup = State()
 
 # ========== КЛАВИАТУРЫ ==========
 def get_main_keyboard(is_admin: bool = False):
-    """Главная клавиатура"""
     buttons = [
         [
             types.KeyboardButton(text="🎮 Клиенты"),
@@ -608,7 +654,6 @@ def get_main_keyboard(is_admin: bool = False):
     return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 def get_version_keyboard(versions: List[str], category: str):
-    """Клавиатура выбора версии"""
     buttons = []
     row = []
     for v in versions:
@@ -622,7 +667,6 @@ def get_version_keyboard(versions: List[str], category: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages: int):
-    """Клавиатура со списком элементов"""
     buttons = []
     for item in items:
         item_id = item[0]
@@ -660,7 +704,6 @@ def get_items_keyboard(items: List[Tuple], category: str, page: int, total_pages
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_detail_keyboard(category: str, item_id: int, is_favorite: bool = False):
-    """Клавиатура для детального просмотра"""
     buttons = []
     
     if category == "packs":
@@ -678,7 +721,6 @@ def get_detail_keyboard(category: str, item_id: int, is_favorite: bool = False):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_main_keyboard():
-    """Главная клавиатура админ-панели"""
     buttons = [
         [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
@@ -690,7 +732,6 @@ def get_admin_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_category_keyboard(category: str):
-    """Клавиатура действий для категории"""
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить", callback_data=f"add_{category}")],
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{category}")],
@@ -701,7 +742,6 @@ def get_admin_category_keyboard(category: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_items_keyboard(items: List[Tuple], category: str, action: str):
-    """Клавиатура со списком элементов для админа"""
     buttons = []
     for item_id, name, short_desc, downloads, version in items[:10]:
         buttons.append([InlineKeyboardButton(
@@ -712,7 +752,6 @@ def get_admin_items_keyboard(items: List[Tuple], category: str, action: str):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_edit_fields_keyboard(category: str, item_id: int):
-    """Клавиатура выбора поля для редактирования"""
     if category == "packs":
         fields = [
             ["📝 Название", f"edit_name_{category}_{item_id}"],
@@ -745,7 +784,6 @@ def get_help_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_broadcast_confirm_keyboard():
-    """Клавиатура подтверждения рассылки"""
     buttons = [
         [InlineKeyboardButton(text="✅ Отправить", callback_data="broadcast_send")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast_cancel")]
@@ -1365,9 +1403,18 @@ async def zip_restore(callback: CallbackQuery):
     filename = callback.data.replace("zip_restore_", "")
     filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
     
+    # Проверяем существование файла
     if not os.path.exists(filepath):
-        await callback.answer("❌ Файл не найден", show_alert=True)
-        return
+        # Пробуем найти в других папках
+        alt_path = os.path.join(BACKUP_DIR, filename)
+        if os.path.exists(alt_path):
+            filepath = alt_path
+        else:
+            await callback.answer("❌ Файл не найден", show_alert=True)
+            return
+    
+    # Получаем размер файла для информации
+    file_size = os.path.getsize(filepath) // 1024
     
     # Кнопка подтверждения
     buttons = [
@@ -1377,7 +1424,9 @@ async def zip_restore(callback: CallbackQuery):
     
     await callback.message.edit_text(
         f"⚠️ **ВНИМАНИЕ!**\n\n"
-        f"Ты собираешься восстановить базу из файла:\n`{filename}`\n\n"
+        f"Ты собираешься восстановить базу из файла:\n`{filename}`\n"
+        f"📊 Размер: {file_size} KB\n"
+        f"📍 Путь: `{filepath}`\n\n"
         f"Все текущие данные будут **заменены**!\n\n"
         f"Ты уверен?",
         parse_mode="Markdown",
@@ -1393,9 +1442,29 @@ async def zip_restore_confirm(callback: CallbackQuery):
         return
     
     filename = callback.data.replace("zip_restore_confirm_", "")
-    filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
     
-    await callback.message.edit_text("⏳ **Восстановление из ZIP...**", parse_mode="Markdown")
+    # Ищем файл в разных папках
+    filepath = os.path.join(PERMANENT_BACKUP_DIR, filename)
+    if not os.path.exists(filepath):
+        filepath = os.path.join(BACKUP_DIR, filename)
+    
+    if not os.path.exists(filepath):
+        await callback.message.edit_text(
+            "❌ **Файл не найден!**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        "⏳ **Восстановление из ZIP...**\n\n"
+        f"Файл: `{filename}`\n"
+        "Это может занять несколько секунд...",
+        parse_mode="Markdown"
+    )
     
     # Сначала создаём бэкап текущего состояния
     await create_zip_backup()
@@ -1405,7 +1474,8 @@ async def zip_restore_confirm(callback: CallbackQuery):
     
     if success:
         await callback.message.edit_text(
-            "✅ **База успешно восстановлена из ZIP!**",
+            "✅ **База успешно восстановлена из ZIP!**\n\n"
+            "Все данные восстановлены.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
@@ -1413,7 +1483,8 @@ async def zip_restore_confirm(callback: CallbackQuery):
         )
     else:
         await callback.message.edit_text(
-            "❌ **Ошибка восстановления!**",
+            "❌ **Ошибка восстановления!**\n\n"
+            "Проверь логи для подробностей.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
