@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import asyncio
 import json
@@ -114,7 +114,7 @@ def init_db():
     print("✅ База данных клиентов готова")
 
 def init_users_db():
-    """Создание базы данных пользователей с поддержкой лимитов и VIP"""
+    """Создание базы данных пользователей с поддержкой рефералов"""
     conn = sqlite3.connect(str(USERS_DB_PATH))
     cur = conn.cursor()
     
@@ -128,8 +128,7 @@ def init_users_db():
             status TEXT DEFAULT 'user',
             vip_until TIMESTAMP,
             invites INTEGER DEFAULT 0,
-            downloads_this_week INTEGER DEFAULT 0,
-            last_download_reset TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            downloads_total INTEGER DEFAULT 0,
             first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -161,7 +160,7 @@ def init_users_db():
     
     conn.commit()
     conn.close()
-    print("✅ База данных пользователей обновлена с поддержкой VIP")
+    print("✅ База данных пользователей готова")
 
 # Инициализация
 init_db()
@@ -195,13 +194,13 @@ def get_all_users() -> list:
         return []
 
 def get_user_status(user_id: int) -> dict:
-    """Получить статус пользователя"""
+    """Получить статус пользователя (без лимитов)"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
         cur.execute('''
-            SELECT user_id, username, status, vip_until, invites, downloads_this_week 
+            SELECT user_id, username, status, vip_until, invites, downloads_total 
             FROM users WHERE user_id = ?
         ''', (user_id,))
         user = cur.fetchone()
@@ -219,10 +218,10 @@ def get_user_status(user_id: int) -> dict:
                 'is_vip': False,
                 'is_admin': (user_id == ADMIN_ID),
                 'invites': 0,
-                'downloads_left': 1
+                'downloads_total': 0
             }
         else:
-            # Проверяем, не истёк ли VIP
+            # Проверяем, не истёк ли VIP (оставим для совместимости)
             vip_until = user[3]
             is_vip = False
             if vip_until:
@@ -239,7 +238,7 @@ def get_user_status(user_id: int) -> dict:
                 'is_vip': is_vip,
                 'is_admin': (user_id == ADMIN_ID),
                 'invites': user[4] or 0,
-                'downloads_left': None if is_vip or user_id == ADMIN_ID else max(0, 1 - (user[5] or 0))
+                'downloads_total': user[5] or 0
             }
         
         conn.close()
@@ -252,97 +251,24 @@ def get_user_status(user_id: int) -> dict:
             'is_vip': False,
             'is_admin': (user_id == ADMIN_ID),
             'invites': 0,
-            'downloads_left': 1
+            'downloads_total': 0
         }
 
-def can_download(user_id: int) -> tuple:
-    """Проверить, может ли пользователь скачать файл"""
-    try:
-        # Админ может всё
-        if user_id == ADMIN_ID:
-            return True, "admin"
-        
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        
-        # Получаем информацию о пользователе
-        cur.execute('SELECT status, vip_until, downloads_this_week, last_download_reset FROM users WHERE user_id = ?', (user_id,))
-        user = cur.fetchone()
-        
-        if not user:
-            conn.close()
-            return True, "new_user"  # Новый пользователь может скачать первый раз
-        
-        status, vip_until, downloads_this_week, last_reset = user
-        
-        # Проверяем VIP
-        if vip_until:
-            try:
-                vip_date = datetime.fromisoformat(vip_until)
-                if vip_date > datetime.now():
-                    conn.close()
-                    return True, "vip"
-            except:
-                pass
-        
-        # Проверяем недельный лимит
-        # Если прошло больше недели с последнего сброса - обнуляем
-        if last_reset:
-            try:
-                last_reset_date = datetime.fromisoformat(last_reset)
-                if (datetime.now() - last_reset_date).days >= 7:
-                    cur.execute('UPDATE users SET downloads_this_week = 0, last_download_reset = CURRENT_TIMESTAMP WHERE user_id = ?', (user_id,))
-                    downloads_this_week = 0
-                    conn.commit()
-            except:
-                pass
-        
-        if downloads_this_week < 1:
-            conn.close()
-            return True, "user"
-        else:
-            conn.close()
-            return False, "limit_reached"
-            
-    except Exception as e:
-        logger.error(f"Ошибка проверки скачивания: {e}")
-        return True, "error"  # В случае ошибки разрешаем
-
 def increment_download_count(user_id: int):
-    """Увеличить счётчик скачиваний пользователя"""
+    """Увеличить общий счётчик скачиваний пользователя (только для статистики)"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        
-        # Проверяем, нужно ли сбросить счётчик
-        cur.execute('SELECT downloads_this_week, last_download_reset FROM users WHERE user_id = ?', (user_id,))
-        user = cur.fetchone()
-        
-        downloads = 0
-        if user:
-            downloads, last_reset = user
-            if last_reset:
-                try:
-                    last_reset_date = datetime.fromisoformat(last_reset)
-                    if (datetime.now() - last_reset_date).days >= 7:
-                        downloads = 0
-                except:
-                    pass
-        
         cur.execute('''
-            UPDATE users SET 
-                downloads_this_week = ?,
-                last_download_reset = CURRENT_TIMESTAMP
-            WHERE user_id = ?
-        ''', ((downloads or 0) + 1, user_id))
-        
+            UPDATE users SET downloads_total = downloads_total + 1 WHERE user_id = ?
+        ''', (user_id,))
         conn.commit()
         conn.close()
     except Exception as e:
         logger.error(f"Ошибка увеличения счётчика: {e}")
 
 def add_referral(referrer_id: int, referred_id: int):
-    """Добавить реферала и активировать VIP для пригласившего"""
+    """Добавить реферала (только для статистики)"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -357,12 +283,6 @@ def add_referral(referrer_id: int, referred_id: int):
             cur.execute('''
                 UPDATE users SET invites = invites + 1 WHERE user_id = ?
             ''', (referrer_id,))
-            
-            # VIP навсегда (ставим дату на 100 лет вперёд)
-            far_future = (datetime.now() + timedelta(days=36500)).isoformat()
-            cur.execute('''
-                UPDATE users SET status = 'vip', vip_until = ? WHERE user_id = ?
-            ''', (far_future, referrer_id))
         
         conn.commit()
         conn.close()
@@ -827,7 +747,7 @@ async def cmd_start(message: Message):
         "🎨 Ресурспаки - текстурпаки\n"
         "❤️ Избранное - сохраняй понравившееся\n"
         "⚙️ Конфиги - настройки\n"
-        "👤 Профиль - твой статус и лимиты\n"
+        "👤 Профиль - твой профиль\n"
         "ℹ️ Инфо - о боте и создателе\n"
         "❓ Помощь - связаться с админом\n\n"
         "Используй кнопки ниже:",
@@ -901,52 +821,51 @@ async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"⚙️ Конфиги для версии {version} (стр 1/{total_pages}):", reply_markup=get_items_keyboard(items, "configs", 1, total_pages))
     await callback.answer()
 
-# ========== ПРОФИЛЬ ==========
+# ========== ПРОФИЛЬ (НОВАЯ ВЕРСИЯ) ==========
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: Message):
-    """Показать профиль пользователя"""
+    """Показать приветственный профиль"""
     try:
         user_id = message.from_user.id
+        first_name = message.from_user.first_name or "пользователь"
+        
+        # Получаем информацию о пользователе (только для статистики)
         status_data = get_user_status(user_id)
         
-        # Определяем статус
+        # Определяем статус для информации
         if user_id == ADMIN_ID:
             status_text = "👑 СОЗДАТЕЛЬ"
         elif status_data.get('is_admin'):
             status_text = "⚙️ АДМИН"
-        elif status_data.get('is_vip'):
-            status_text = "💎 VIP"
         else:
             status_text = "👤 ПОЛЬЗОВАТЕЛЬ"
         
-        # Информация о лимитах
-        if user_id == ADMIN_ID or status_data.get('is_vip'):
-            limit_text = "∞ Безлимитно"
-        else:
-            limit_text = f"{status_data.get('downloads_left', 1)}/1 на этой неделе"
-        
-        # Реферальная ссылка
+        # Реферальная ссылка для приглашения
         bot_info = await bot.me()
         bot_username = bot_info.username
         ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
         
         text = (
-            f"**👤 Твой профиль**\n\n"
-            f"**Статус:** {status_text}\n"
-            f"**ID:** `{user_id}`\n"
-            f"**Приглашений:** {status_data.get('invites', 0)}\n"
-            f"**Лимит скачиваний:** {limit_text}\n\n"
-            f"**💎 Как получить VIP?**\n"
-            f"Пригласи 1 друга в бота и получи VIP навсегда!\n\n"
-            f"**Твоя реферальная ссылка:**\n"
+            f"👋 **Привет, {first_name}!** ❤️\n\n"
+            f"**Мой любимый пользователь!**\n\n"
+            f"🎉 **Этот бот абсолютно бесплатный!**\n"
+            f"Никаких лимитов, никаких ограничений — качай сколько хочешь!\n\n"
+            f"📊 **Твоя статистика:**\n"
+            f"• Статус: {status_text}\n"
+            f"• ID: `{user_id}`\n"
+            f"• Всего скачиваний: {status_data.get('downloads_total', 0)}\n"
+            f"• Приглашено друзей: {status_data.get('invites', 0)}\n\n"
+            f"🤗 **Мне будет очень приятно, если ты поделишься ботом с друзьями!**\n\n"
+            f"**Твоя ссылка для приглашения:**\n"
             f"`{ref_link}`\n\n"
-            f"Просто отправь эту ссылку друзьям."
+            f"Просто отправь её друзьям. Спасибо, что ты с нами! 💖"
         )
         
         # Кнопки для профиля
         buttons = [
             [InlineKeyboardButton(text="📊 Моя статистика", callback_data="profile_stats")],
-            [InlineKeyboardButton(text="📋 Мои скачивания", callback_data="profile_downloads")]
+            [InlineKeyboardButton(text="📋 Мои скачивания", callback_data="profile_downloads")],
+            [InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Привет! Отличный бот с клиентами для Minecraft!")]
         ]
         
         await message.answer(
@@ -957,8 +876,10 @@ async def show_profile(message: Message):
     except Exception as e:
         logger.error(f"Ошибка в профиле: {e}")
         await message.answer(
-            "❌ **Ошибка загрузки профиля**\n"
-            "Попробуй позже или напиши админу.",
+            "👋 **Привет!**\n\n"
+            "🎉 **Этот бот абсолютно бесплатный!**\n\n"
+            f"**Ссылка для приглашения:**\n"
+            f"https://t.me/{(await bot.me()).username}",
             parse_mode="Markdown"
         )
 
@@ -1144,42 +1065,20 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
     await callback.answer()
 
-# ========== СКАЧИВАНИЕ С ПРОВЕРКОЙ ЛИМИТОВ ==========
+# ========== СКАЧИВАНИЕ (БЕЗ ЛИМИТОВ) ==========
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_item(callback: CallbackQuery):
-    """Скачивание с проверкой лимитов"""
+    """Скачивание без лимитов"""
     _, category, item_id = callback.data.split("_")
     item_id = int(item_id)
     user_id = callback.from_user.id
-    
-    # Проверяем, может ли пользователь скачать
-    can_dl, reason = can_download(user_id)
-    
-    if not can_dl:
-        if reason == "limit_reached":
-            # Получаем реферальную ссылку
-            bot_info = await bot.me()
-            bot_username = bot_info.username
-            ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-            
-            await callback.message.answer(
-                "⚠️ **Лимит скачиваний исчерпан!**\n\n"
-                "На этой неделе ты уже скачал 1 файл.\n\n"
-                "💎 **Хочешь скачивать безлимитно?**\n"
-                "Пригласи 1 друга в бота и получи VIP навсегда!\n\n"
-                f"**Твоя реферальная ссылка:**\n`{ref_link}`\n\n"
-                "Просто отправь её друзьям.",
-                parse_mode="Markdown"
-            )
-        await callback.answer("❌ Лимит исчерпан", show_alert=True)
-        return
     
     item = get_item(category, item_id)
     if not item:
         await callback.answer("❌ Не найден", show_alert=True)
         return
     
-    # Увеличиваем счётчик скачиваний
+    # Увеличиваем счётчик скачиваний (просто для статистики)
     increment_download(category, item_id)
     increment_download_count(user_id)
     
@@ -1245,7 +1144,7 @@ async def info(message: Message):
         await message.answer(
             f"**Информация о боте**\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 13.2\n\n"
+            f"Версия: 14.0 (Бесплатный)\n\n"
             f"📊 **Статистика:**\n"
             f"• Пользователей: {users_count}\n"
             f"• Клиентов: {clients_count}\n"
@@ -1253,7 +1152,7 @@ async def info(message: Message):
             f"• Конфигов: {configs_count}\n"
             f"• ZIP бэкапов: {backups_count}\n\n"
             f"📁 Данные хранятся в `/app/data`\n"
-            f"💎 VIP даётся за приглашение друга!",
+            f"🎉 **Бот полностью бесплатный!**",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -1261,7 +1160,7 @@ async def info(message: Message):
         await message.answer(
             f"**Информация о боте**\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 13.2",
+            f"Версия: 14.0",
             parse_mode="Markdown"
         )
 
@@ -1294,10 +1193,8 @@ async def help_faq(callback: CallbackQuery):
         "❓ **Часто задаваемые вопросы**\n\n"
         "**Q:** Как скачать файл?\n"
         "**A:** Нажми на элемент, затем кнопку 'Скачать'\n\n"
-        "**Q:** Как получить VIP?\n"
-        "**A:** Пригласи 1 друга в бота по своей реферальной ссылке\n\n"
-        "**Q:** Сколько можно скачивать?\n"
-        "**A:** 1 файл в неделю, с VIP безлимитно\n\n"
+        "**Q:** Есть ли лимиты?\n"
+        "**A:** Нет! Бот полностью бесплатный, качай сколько хочешь!\n\n"
         "**Q:** Как сделать бэкап?\n"
         "**A:** В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'",
         parse_mode="Markdown",
@@ -2347,11 +2244,10 @@ async def main():
     print(f"📁 Папка данных: {DATA_DIR}")
     print("="*50)
     print("📌 Новые функции:")
-    print("   • 👤 Профиль с реферальной системой")
-    print("   • 💎 VIP статус за приглашение друга")
-    print("   • 📊 Лимит скачиваний (1 файл в неделю)")
-    print("   • 🔧 Исправлены все кнопки в админке")
-    print("   • ✅ Работает инфо, статистика, рассылка")
+    print("   • 👤 Профиль с приветствием")
+    print("   • 🎉 Бот полностью бесплатный")
+    print("   • 📊 Статистика скачиваний")
+    print("   • 🔧 Исправлены все кнопки")
     print("="*50)
     await dp.start_polling(bot)
 
