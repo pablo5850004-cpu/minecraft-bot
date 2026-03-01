@@ -17,12 +17,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = "8732938464:AAHIsqjKA8wFCcK8iQi1FRGokH6cf8ypSmY"
+# Получаем токен из переменных окружения (для bothost.ru)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
 
 if not BOT_TOKEN:
-    raise ValueError("❌ Ошибка: BOT_TOKEN не найден!")
+    raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,12 +50,10 @@ def init_db():
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
-    # Клиенты
     cur.execute('''
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            short_desc TEXT NOT NULL,
             full_desc TEXT NOT NULL,
             media TEXT DEFAULT '[]',
             download_url TEXT NOT NULL,
@@ -65,12 +64,10 @@ def init_db():
         )
     ''')
     
-    # Ресурспаки
     cur.execute('''
         CREATE TABLE IF NOT EXISTS resourcepacks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            short_desc TEXT NOT NULL,
             full_desc TEXT NOT NULL,
             media TEXT DEFAULT '[]',
             download_url TEXT NOT NULL,
@@ -83,12 +80,10 @@ def init_db():
         )
     ''')
     
-    # Конфиги
     cur.execute('''
         CREATE TABLE IF NOT EXISTS configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            short_desc TEXT NOT NULL,
             full_desc TEXT NOT NULL,
             media TEXT DEFAULT '[]',
             download_url TEXT NOT NULL,
@@ -99,7 +94,6 @@ def init_db():
         )
     ''')
     
-    # Избранное
     cur.execute('''
         CREATE TABLE IF NOT EXISTS favorites (
             user_id INTEGER NOT NULL,
@@ -118,7 +112,6 @@ def init_users_db():
     conn = sqlite3.connect(str(USERS_DB_PATH))
     cur = conn.cursor()
     
-    # Основная таблица пользователей
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -132,7 +125,6 @@ def init_users_db():
         )
     ''')
     
-    # Таблица для реферальных приглашений
     cur.execute('''
         CREATE TABLE IF NOT EXISTS referrals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,7 +136,6 @@ def init_users_db():
         )
     ''')
     
-    # Таблица для отслеживания скачиваний
     cur.execute('''
         CREATE TABLE IF NOT EXISTS downloads_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,7 +160,6 @@ backup_map = {}
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ ==========
 def get_users_count() -> int:
-    """Получить количество пользователей"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -182,7 +172,6 @@ def get_users_count() -> int:
         return 0
 
 def get_all_users() -> list:
-    """Получить список всех пользователей"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -195,7 +184,6 @@ def get_all_users() -> list:
         return []
 
 def get_user_status(user_id: int) -> dict:
-    """Получить статус пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -207,7 +195,6 @@ def get_user_status(user_id: int) -> dict:
         user = cur.fetchone()
         
         if not user:
-            # Если пользователя нет, создаём нового
             cur.execute('''
                 INSERT INTO users (user_id) VALUES (?)
             ''', (user_id,))
@@ -238,7 +225,6 @@ def get_user_status(user_id: int) -> dict:
         }
 
 def increment_download_count(user_id: int):
-    """Увеличить общий счётчик скачиваний пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -251,18 +237,15 @@ def increment_download_count(user_id: int):
         logger.error(f"Ошибка увеличения счётчика: {e}")
 
 def add_referral(referrer_id: int, referred_id: int):
-    """Добавить реферала"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
-        # Добавляем запись о реферале
         cur.execute('''
             INSERT OR IGNORE INTO referrals (referrer_id, referred_id) VALUES (?, ?)
         ''', (referrer_id, referred_id))
         
         if cur.rowcount > 0:
-            # Увеличиваем счётчик приглашений
             cur.execute('''
                 UPDATE users SET invites = invites + 1 WHERE user_id = ?
             ''', (referrer_id,))
@@ -275,7 +258,6 @@ def add_referral(referrer_id: int, referred_id: int):
         return False
 
 def save_user(message: Message):
-    """Сохранить пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -285,12 +267,10 @@ def save_user(message: Message):
         first_name = message.from_user.first_name
         last_name = message.from_user.last_name
         
-        # Проверяем, есть ли пользователь
         cur.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
         exists = cur.fetchone()
         
         if not exists:
-            # Новый пользователь - проверяем реферальную ссылку
             referrer_id = None
             if message.text and message.text.startswith('/start ref_'):
                 try:
@@ -334,7 +314,7 @@ def get_item(table: str, item_id: int):
 def get_all_items(table: str):
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
-    cur.execute(f'SELECT id, name, short_desc, media, downloads, version FROM {table} ORDER BY created_at DESC')
+    cur.execute(f'SELECT id, name, full_desc, media, downloads, version FROM {table} ORDER BY created_at DESC')
     items = cur.fetchall()
     conn.close()
     return items
@@ -347,15 +327,15 @@ def delete_item(table: str, item_id: int):
     conn.close()
 
 # ========== ФУНКЦИИ ДЛЯ КЛИЕНТОВ ==========
-def add_client(name, short_desc, full_desc, url, version, media=None):
+def add_client(name, full_desc, url, version, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO clients (name, short_desc, full_desc, download_url, version, media)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, short_desc, full_desc, url, version, media_json))
+            INSERT INTO clients (name, full_desc, download_url, version, media)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -376,7 +356,7 @@ def get_clients_by_version(version, page=1, per_page=10):
     cur = conn.cursor()
     offset = (page - 1) * per_page
     cur.execute('''
-        SELECT id, name, short_desc, media, downloads, views, version 
+        SELECT id, name, full_desc, media, downloads, views, version 
         FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
     ''', (version, per_page, offset))
     items = cur.fetchall()
@@ -393,15 +373,15 @@ def get_all_client_versions():
     return versions
 
 # ========== ФУНКЦИИ ДЛЯ РЕСУРСПАКОВ ==========
-def add_pack(name, short_desc, full_desc, url, version, author, media=None):
+def add_pack(name, full_desc, url, version, author, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO resourcepacks (name, short_desc, full_desc, download_url, version, author, media)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (name, short_desc, full_desc, url, version, author, media_json))
+            INSERT INTO resourcepacks (name, full_desc, download_url, version, author, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, author, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -422,7 +402,7 @@ def get_packs_by_version(version, page=1, per_page=10):
     cur = conn.cursor()
     offset = (page - 1) * per_page
     cur.execute('''
-        SELECT id, name, short_desc, media, downloads, likes, views, version, author 
+        SELECT id, name, full_desc, media, downloads, likes, views, version, author 
         FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
     ''', (version, per_page, offset))
     items = cur.fetchall()
@@ -439,15 +419,15 @@ def get_all_pack_versions():
     return versions
 
 # ========== ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
-def add_config(name, short_desc, full_desc, url, version, media=None):
+def add_config(name, full_desc, url, version, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO configs (name, short_desc, full_desc, download_url, version, media)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, short_desc, full_desc, url, version, media_json))
+            INSERT INTO configs (name, full_desc, download_url, version, media)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -468,7 +448,7 @@ def get_configs_by_version(version, page=1, per_page=10):
     cur = conn.cursor()
     offset = (page - 1) * per_page
     cur.execute('''
-        SELECT id, name, short_desc, media, downloads, views, version 
+        SELECT id, name, full_desc, media, downloads, views, version 
         FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
     ''', (version, per_page, offset))
     items = cur.fetchall()
@@ -506,7 +486,7 @@ def get_favorites(user_id):
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute('''
-        SELECT r.id, r.name, r.short_desc, r.media, r.downloads, r.likes 
+        SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes 
         FROM resourcepacks r JOIN favorites f ON r.id = f.pack_id
         WHERE f.user_id = ? ORDER BY f.added_at DESC
     ''', (user_id,))
@@ -594,14 +574,12 @@ def get_version_display(version):
 # ========== СОСТОЯНИЯ ==========
 class AdminStates(StatesGroup):
     client_name = State()
-    client_short_desc = State()
     client_full_desc = State()
     client_version = State()
     client_url = State()
     client_media = State()
     
     pack_name = State()
-    pack_short_desc = State()
     pack_full_desc = State()
     pack_version = State()
     pack_author = State()
@@ -609,7 +587,6 @@ class AdminStates(StatesGroup):
     pack_media = State()
     
     config_name = State()
-    config_short_desc = State()
     config_full_desc = State()
     config_version = State()
     config_url = State()
@@ -646,14 +623,14 @@ def get_version_keyboard(versions, category):
 def get_items_keyboard(items, category, page, total_pages):
     buttons = []
     for item in items:
-        item_id, name, short_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
+        item_id, name, full_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
         version = item[6] if len(item) > 6 else "?"
         try:
             media_list = json.loads(media_json) if media_json else []
         except:
             media_list = []
         preview = "🖼️" if media_list else "📄"
-        button_text = f"{preview} {name[:30]} ({version})\n{short_desc[:40]}... 📥 {format_number(downloads)}"
+        button_text = f"{preview} {name[:30]} ({version})\n📥 {format_number(downloads)}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"detail_{category}_{item_id}")])
     
     nav_row = []
@@ -933,15 +910,15 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     media_list = json.loads(item[4]) if item[4] else []
     
     if category == "clients":
-        text = f"{item[1]}\n\n{item[3]}\n\nВерсия: {item[6]}\n📥 Скачиваний: {format_number(item[7])}\n👁 Просмотров: {format_number(item[8])}"
+        text = f"{item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[6])}\n👁 Просмотров: {format_number(item[7])}"
     elif category == "packs":
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         is_fav = cur.execute('SELECT 1 FROM favorites WHERE user_id = ? AND pack_id = ?', (callback.from_user.id, item_id)).fetchone()
         conn.close()
-        text = f"{item[1]}\n\n{item[3]}\n\nАвтор: {item[7]}\nВерсия: {item[6]}\n📥 Скачиваний: {format_number(item[8])}\n❤️ В избранном: {format_number(item[9])}\n👁 Просмотров: {format_number(item[10])}"
+        text = f"{item[1]}\n\n{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[7])}\n❤️ В избранном: {format_number(item[8])}\n👁 Просмотров: {format_number(item[9])}"
     else:
-        text = f"{item[1]}\n\n{item[3]}\n\nВерсия: {item[6]}\n📥 Скачиваний: {format_number(item[7])}\n👁 Просмотров: {format_number(item[8])}"
+        text = f"{item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[6])}\n👁 Просмотров: {format_number(item[7])}"
     
     if media_list and media_list[0]['type'] == 'photo':
         await callback.message.answer_photo(photo=media_list[0]['id'], caption=text, reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False))
@@ -1059,7 +1036,7 @@ async def info(message: Message):
         text = (
             f"Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 15.0\n\n"
+            f"Версия: 16.0\n\n"
             f"Статистика:\n"
             f"• Пользователей: {users_count}\n"
             f"• Клиентов: {clients_count}\n"
@@ -1073,7 +1050,7 @@ async def info(message: Message):
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 15.0")
+        await message.answer(f"Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 16.0")
 
 # ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
@@ -1178,12 +1155,6 @@ async def add_client_start(callback: CallbackQuery, state: FSMContext):
 @dp.message(AdminStates.client_name)
 async def client_name(message: Message, state: FSMContext):
     await state.update_data(client_name=message.text)
-    await state.set_state(AdminStates.client_short_desc)
-    await message.answer("📄 Введи краткое описание:")
-
-@dp.message(AdminStates.client_short_desc)
-async def client_short_desc(message: Message, state: FSMContext):
-    await state.update_data(client_short_desc=message.text)
     await state.set_state(AdminStates.client_full_desc)
     await message.answer("📚 Введи полное описание:")
 
@@ -1213,7 +1184,7 @@ async def client_media(message: Message, state: FSMContext):
     media_list = data.get('media_list', [])
     
     if message.text and message.text.lower() == 'готово':
-        item_id = add_client(data['client_name'], data['client_short_desc'], data['client_full_desc'], data['client_url'], data['client_version'], media_list)
+        item_id = add_client(data['client_name'], data['client_full_desc'], data['client_url'], data['client_version'], media_list)
         await state.clear()
         if item_id:
             await message.answer(f"✅ Клиент добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", reply_markup=get_main_keyboard(is_admin=True))
@@ -1222,7 +1193,7 @@ async def client_media(message: Message, state: FSMContext):
         return
     
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_client(data['client_name'], data['client_short_desc'], data['client_full_desc'], data['client_url'], data['client_version'], [])
+        item_id = add_client(data['client_name'], data['client_full_desc'], data['client_url'], data['client_version'], [])
         await state.clear()
         if item_id:
             await message.answer(f"✅ Клиент добавлен!\nID: {item_id} (без фото)", reply_markup=get_main_keyboard(is_admin=True))
@@ -1249,7 +1220,7 @@ async def edit_client_list(callback: CallbackQuery):
         await callback.answer()
         return
     buttons = []
-    for item_id, name, short_desc, media_json, downloads, version in items[:10]:
+    for item_id, name, full_desc, media_json, downloads, version in items[:10]:
         buttons.append([InlineKeyboardButton(text=f"{item_id}. {name[:30]} ({version}) 📥 {downloads}", callback_data=f"edit_client_{item_id}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     await callback.message.edit_text("✏️ Выбери клиента для редактирования:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -1271,7 +1242,6 @@ async def edit_client_select(callback: CallbackQuery):
         return
     fields = [
         [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_client_field_name_{item_id}")],
-        [InlineKeyboardButton(text="📄 Краткое описание", callback_data=f"edit_client_field_short_{item_id}")],
         [InlineKeyboardButton(text="📚 Полное описание", callback_data=f"edit_client_field_full_{item_id}")],
         [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_client_field_version_{item_id}")],
         [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_client_field_url_{item_id}")],
@@ -1288,7 +1258,7 @@ async def edit_client_field(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     field = parts[3]
     item_id = int(parts[4])
-    field_map = {'name': 'name', 'short': 'short_desc', 'full': 'full_desc', 'version': 'version', 'url': 'download_url'}
+    field_map = {'name': 'name', 'full': 'full_desc', 'version': 'version', 'url': 'download_url'}
     db_field = field_map.get(field)
     if not db_field:
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -1310,7 +1280,7 @@ async def delete_client_list(callback: CallbackQuery):
         await callback.answer()
         return
     buttons = []
-    for item_id, name, short_desc, media_json, downloads, version in items[:10]:
+    for item_id, name, full_desc, media_json, downloads, version in items[:10]:
         buttons.append([InlineKeyboardButton(text=f"{item_id}. {name[:30]} ({version}) 📥 {downloads}", callback_data=f"delete_client_{item_id}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     await callback.message.edit_text("🗑 Выбери клиента для удаления:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -1362,12 +1332,12 @@ async def list_clients(callback: CallbackQuery):
         text = "📭 Список клиентов пуст"
     else:
         text = "📋 Список клиентов:\n\n"
-        for item_id, name, short_desc, media_json, downloads, version in items[:20]:
-            text += f"{item_id}. {name} ({version})\n   {short_desc[:50]}... 📥 {downloads}\n\n"
+        for item_id, name, full_desc, media_json, downloads, version in items[:20]:
+            text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]]))
     await callback.answer()
 
-# ========== АДМИН: РЕСУРСПАКИ (КРАТКО) ==========
+# ========== АДМИН: РЕСУРСПАКИ ==========
 @dp.callback_query(lambda c: c.data == "add_pack")
 async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -1380,12 +1350,6 @@ async def add_pack_start(callback: CallbackQuery, state: FSMContext):
 @dp.message(AdminStates.pack_name)
 async def pack_name(message: Message, state: FSMContext):
     await state.update_data(pack_name=message.text)
-    await state.set_state(AdminStates.pack_short_desc)
-    await message.answer("📄 Введи краткое описание:")
-
-@dp.message(AdminStates.pack_short_desc)
-async def pack_short_desc(message: Message, state: FSMContext):
-    await state.update_data(pack_short_desc=message.text)
     await state.set_state(AdminStates.pack_full_desc)
     await message.answer("📚 Введи полное описание:")
 
@@ -1421,7 +1385,7 @@ async def pack_media(message: Message, state: FSMContext):
     media_list = data.get('media_list', [])
     
     if message.text and message.text.lower() == 'готово':
-        item_id = add_pack(data['pack_name'], data['pack_short_desc'], data['pack_full_desc'], data['pack_url'], data['pack_version'], data['pack_author'], media_list)
+        item_id = add_pack(data['pack_name'], data['pack_full_desc'], data['pack_url'], data['pack_version'], data['pack_author'], media_list)
         await state.clear()
         if item_id:
             await message.answer(f"✅ Ресурспак добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", reply_markup=get_main_keyboard(is_admin=True))
@@ -1430,7 +1394,7 @@ async def pack_media(message: Message, state: FSMContext):
         return
     
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_pack(data['pack_name'], data['pack_short_desc'], data['pack_full_desc'], data['pack_url'], data['pack_version'], data['pack_author'], [])
+        item_id = add_pack(data['pack_name'], data['pack_full_desc'], data['pack_url'], data['pack_version'], data['pack_author'], [])
         await state.clear()
         if item_id:
             await message.answer(f"✅ Ресурспак добавлен!\nID: {item_id} (без фото)", reply_markup=get_main_keyboard(is_admin=True))
@@ -1445,7 +1409,7 @@ async def pack_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
-# ========== АДМИН: КОНФИГИ (КРАТКО) ==========
+# ========== АДМИН: КОНФИГИ ==========
 @dp.callback_query(lambda c: c.data == "add_config")
 async def add_config_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -1458,12 +1422,6 @@ async def add_config_start(callback: CallbackQuery, state: FSMContext):
 @dp.message(AdminStates.config_name)
 async def config_name(message: Message, state: FSMContext):
     await state.update_data(config_name=message.text)
-    await state.set_state(AdminStates.config_short_desc)
-    await message.answer("📄 Введи краткое описание:")
-
-@dp.message(AdminStates.config_short_desc)
-async def config_short_desc(message: Message, state: FSMContext):
-    await state.update_data(config_short_desc=message.text)
     await state.set_state(AdminStates.config_full_desc)
     await message.answer("📚 Введи полное описание:")
 
@@ -1493,7 +1451,7 @@ async def config_media(message: Message, state: FSMContext):
     media_list = data.get('media_list', [])
     
     if message.text and message.text.lower() == 'готово':
-        item_id = add_config(data['config_name'], data['config_short_desc'], data['config_full_desc'], data['config_url'], data['config_version'], media_list)
+        item_id = add_config(data['config_name'], data['config_full_desc'], data['config_url'], data['config_version'], media_list)
         await state.clear()
         if item_id:
             await message.answer(f"✅ Конфиг добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", reply_markup=get_main_keyboard(is_admin=True))
@@ -1502,7 +1460,7 @@ async def config_media(message: Message, state: FSMContext):
         return
     
     if message.text and message.text.lower() == 'пропустить':
-        item_id = add_config(data['config_name'], data['config_short_desc'], data['config_full_desc'], data['config_url'], data['config_version'], [])
+        item_id = add_config(data['config_name'], data['config_full_desc'], data['config_url'], data['config_version'], [])
         await state.clear()
         if item_id:
             await message.answer(f"✅ Конфиг добавлен!\nID: {item_id} (без фото)", reply_markup=get_main_keyboard(is_admin=True))
@@ -1530,7 +1488,7 @@ async def edit_value(message: Message, state: FSMContext):
         await state.clear()
         return
     
-    if category == 'resourcepacks':
+    if category == 'packs':
         update_pack(item_id, field, message.text)
     elif category == 'configs':
         update_config(item_id, field, message.text)
@@ -1564,16 +1522,16 @@ async def admin_zip_backups(callback: CallbackQuery):
     else:
         text += "❌ Бэкапов пока нет!\n"
     
-    # Создаём кнопки с короткими ID
+    # Создаём кнопки
     buttons = []
     for i, backup in enumerate(backups[:5], 1):
-        short_id = f"bkp_{i}"
-        backup_map[short_id] = backup  # Сохраняем соответствие
+        # Используем индекс как ключ (более надежно)
+        backup_map[str(i)] = backup
         size = (BACKUP_DIR / backup).stat().st_size // 1024
         short_name = backup[:15] + "..." if len(backup) > 15 else backup
         buttons.append([InlineKeyboardButton(
             text=f"{i}. {short_name} ({size} KB)",
-            callback_data=f"restore_{short_id}"
+            callback_data=f"restore_{i}"
         )])
     
     buttons.append([
@@ -1599,17 +1557,17 @@ async def create_backup(callback: CallbackQuery):
         await callback.message.answer("❌ Ошибка создания бэкапа")
     await admin_zip_backups(callback)
 
-@dp.callback_query(lambda c: c.data.startswith("restore_"))
+@dp.callback_query(lambda c: c.data.startswith("restore_") and c.data != "restore_confirm_")
 async def restore_backup(callback: CallbackQuery):
     """Восстановление из бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    short_id = callback.data.replace("restore_", "")
+    index = callback.data.replace("restore_", "")
     
-    # Получаем имя файла из словаря
-    filename = backup_map.get(short_id)
+    # Получаем имя файла по индексу
+    filename = backup_map.get(index)
     if not filename:
         await callback.answer("❌ Бэкап не найден. Обнови список.", show_alert=True)
         return
@@ -1622,7 +1580,7 @@ async def restore_backup(callback: CallbackQuery):
     file_size = filepath.stat().st_size // 1024
     
     buttons = [
-        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{short_id}")],
+        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{index}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_zip_backups")]
     ]
     
@@ -1639,9 +1597,9 @@ async def restore_confirm(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    short_id = callback.data.replace("restore_confirm_", "")
+    index = callback.data.replace("restore_confirm_", "")
     
-    filename = backup_map.get(short_id)
+    filename = backup_map.get(index)
     if not filename:
         await callback.answer("❌ Бэкап не найден", show_alert=True)
         return
@@ -1908,7 +1866,8 @@ async def main():
     print("   • 📊 Статистика скачиваний")
     print("   • 🔧 Исправлена кнопка Инфо")
     print("   • 🔧 Исправлена пагинация")
-    print("   • 🔧 Исправлены бэкапы (короткие ID)")
+    print("   • 🔧 Исправлены бэкапы")
+    print("   • 🔧 Убраны краткие описания")
     print("="*50)
     await dp.start_polling(bot)
 
