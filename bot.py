@@ -165,9 +165,6 @@ def init_users_db():
 init_db()
 init_users_db()
 
-# ========== СЛОВАРЬ ДЛЯ БЭКАПОВ ==========
-backup_map = {}
-
 # ========== ФУНКЦИИ ДЛЯ ПОЛЬЗОВАТЕЛЕЙ ==========
 def get_users_count() -> int:
     try:
@@ -770,6 +767,28 @@ async def restore_from_zip(zip_path):
     except Exception as e:
         logger.error(f"Ошибка восстановления: {e}")
         return False
+
+def check_backup_structure(zip_path):
+    """Проверяет структуру бэкапа и возвращает отчет о несоответствиях"""
+    issues = []
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            files = zipf.namelist()
+            
+            # Проверяем наличие нужных файлов
+            if 'clients.db' not in files:
+                issues.append("❌ Отсутствует файл clients.db")
+            if 'users.db' not in files:
+                issues.append("❌ Отсутствует файл users.db")
+            
+            # Если есть файлы, проверяем их структуру (опционально)
+            if 'clients.db' in files:
+                # Здесь можно добавить проверку структуры БД
+                pass
+            
+        return issues
+    except Exception as e:
+        return [f"❌ Ошибка проверки архива: {str(e)}"]
 
 # ========== ФУНКЦИЯ ФОРМАТИРОВАНИЯ ЧИСЕЛ ==========
 def format_number(num):
@@ -2459,7 +2478,7 @@ async def list_configs_page(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== ИСПРАВЛЕННЫЙ КОД ДЛЯ БЭКАПОВ ==========
+# ========== АДМИН: БЭКАПЫ С ПРОВЕРКОЙ СТРУКТУРЫ ==========
 @dp.callback_query(lambda c: c.data == "admin_zip_backups")
 async def admin_zip_backups(callback: CallbackQuery):
     """Меню ZIP бэкапов"""
@@ -2467,10 +2486,9 @@ async def admin_zip_backups(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    global backup_map
-    backup_map.clear()
-    
     backups = get_all_backups()
+    
+    # Сортируем бэкапы
     created = [b for b in backups if b.startswith('backup_')]
     uploaded = [b for b in backups if b.startswith('uploaded_')]
     all_backups = created + uploaded
@@ -2492,10 +2510,11 @@ async def admin_zip_backups(callback: CallbackQuery):
     else:
         text += "❌ Бэкапов пока нет!\n"
     
+    # Создаём кнопки - передаем ПОЛНОЕ ИМЯ ФАЙЛА в callback_data
     buttons = []
     for i, b in enumerate(all_backups[:10], 1):
-        index_key = str(i)
-        backup_map[index_key] = b
+        # Кодируем имя файла для безопасной передачи
+        safe_name = b.replace('.', '_dot_').replace('-', '_dash_').replace('_', '__')[:50]
         
         try:
             size = (BACKUP_DIR / b).stat().st_size // 1024
@@ -2506,14 +2525,15 @@ async def admin_zip_backups(callback: CallbackQuery):
                 short_name = b[9:20] + "..."
             buttons.append([InlineKeyboardButton(
                 text=f"{icon} {short_name} ({size} KB)",
-                callback_data=f"restore_{index_key}"
+                callback_data=f"restore_{safe_name}"
             )])
         except:
             buttons.append([InlineKeyboardButton(
                 text=f"{'📦' if b.startswith('backup_') else '📤'} {b[:15]}...",
-                callback_data=f"restore_{index_key}"
+                callback_data=f"restore_{safe_name}"
             )])
     
+    # Кнопки управления
     manage = []
     if all_backups:
         manage.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup_backups"))
@@ -2523,6 +2543,7 @@ async def admin_zip_backups(callback: CallbackQuery):
     ])
     if manage:
         buttons.append(manage)
+    
     buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_zip_backups")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
     
@@ -2554,21 +2575,22 @@ async def create_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_") and not c.data.startswith("restore_confirm_"))
 async def restore_backup(callback: CallbackQuery):
+    """Восстановление из бэкапа с проверкой структуры"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    index = callback.data.replace("restore_", "")
-    filename = backup_map.get(index)
-    
-    if not filename:
-        await callback.answer("❌ Бэкап не найден", show_alert=True)
-        return
+    # Декодируем имя файла
+    safe_name = callback.data.replace("restore_", "")
+    filename = safe_name.replace('_dot_', '.').replace('_dash_', '-').replace('__', '_')
     
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
-        await callback.answer("❌ Файл не найден", show_alert=True)
+        await callback.answer(f"❌ Файл {filename} не найден", show_alert=True)
         return
+    
+    # Проверяем структуру бэкапа
+    issues = check_backup_structure(str(filepath))
     
     try:
         size = filepath.stat().st_size // 1024
@@ -2580,29 +2602,37 @@ async def restore_backup(callback: CallbackQuery):
     icon = "📦" if filename.startswith('backup_') else "📤"
     display = filename.replace('backup_', '').replace('uploaded_', '').replace('.zip', '')
     
+    # Если есть проблемы, показываем предупреждение
+    if issues:
+        warning_text = "\n\n⚠️ ПРОБЛЕМЫ С БЭКАПОМ:\n" + "\n".join(issues)
+        warning_text += "\n\nВосстановление может работать некорректно!"
+    else:
+        warning_text = ""
+    
+    # Снова кодируем для подтверждения
+    safe_name = filename.replace('.', '_dot_').replace('-', '_dash_').replace('_', '__')[:50]
+    
     buttons = [
-        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{index}"),
+        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{safe_name}"),
          InlineKeyboardButton(text="❌ Нет", callback_data="admin_zip_backups")]
     ]
     
     await callback.message.edit_text(
-        f"{icon} Восстановление\n\nФайл: {display}\nРазмер: {size} KB\nДата: {date}\n\n❗ Данные будут заменены!",
+        f"{icon} Восстановление\n\nФайл: {display}\nРазмер: {size} KB\nДата: {date}{warning_text}\n\n❗ Данные будут заменены!",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("restore_confirm_"))
 async def restore_confirm(callback: CallbackQuery):
+    """Подтверждение восстановления"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    index = callback.data.replace("restore_confirm_", "")
-    filename = backup_map.get(index)
-    
-    if not filename:
-        await callback.answer("❌ Бэкап не найден", show_alert=True)
-        return
+    # Декодируем имя файла
+    safe_name = callback.data.replace("restore_confirm_", "")
+    filename = safe_name.replace('_dot_', '.').replace('_dash_', '-').replace('__', '_')
     
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
@@ -2631,16 +2661,21 @@ async def restore_confirm(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "upload_backup")
 async def upload_backup(callback: CallbackQuery, state: FSMContext):
+    """Загрузка бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
     await state.set_state(AdminStates.waiting_for_backup)
-    await callback.message.edit_text("📤 Отправь ZIP файл с бэкапом\n\n❌ Отмена: /cancel")
+    await callback.message.edit_text(
+        "📤 Отправь ZIP файл с бэкапом\n\n"
+        "❌ Отмена: /cancel"
+    )
     await callback.answer()
 
 @dp.message(AdminStates.waiting_for_backup)
 async def handle_upload(message: Message, state: FSMContext):
+    """Обработка загруженного файла с проверкой структуры"""
     if message.from_user.id != ADMIN_ID:
         await state.clear()
         return
@@ -2650,36 +2685,54 @@ async def handle_upload(message: Message, state: FSMContext):
         await message.answer("❌ Загрузка отменена")
         return
     
-    if not message.document or not message.document.file_name.endswith('.zip'):
-        await message.answer("❌ Отправь ZIP файл!")
+    if not message.document:
+        await message.answer("❌ Это не файл! Отправь ZIP файл или /cancel")
         return
     
-    wait = await message.answer("⏳ Загрузка...")
+    if not message.document.file_name.endswith('.zip'):
+        await message.answer("❌ Файл должен быть ZIP! Отправь ZIP файл или /cancel")
+        return
+    
+    wait_msg = await message.answer("⏳ Загрузка файла...")
     
     try:
+        # Скачиваем файл
         file = await bot.get_file(message.document.file_id)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = "".join(c for c in message.document.file_name.replace('.zip', '') if c.isalnum() or c in '._-')[:20]
+        
+        # Сохраняем с оригинальным именем + префикс
+        original_name = message.document.file_name.replace('.zip', '')
+        safe_name = "".join(c for c in original_name if c.isalnum() or c in '._- ')[:30]
         filename = f"uploaded_{timestamp}_{safe_name}.zip"
         filepath = BACKUP_DIR / filename
         
         await bot.download_file(file.file_path, str(filepath))
         
-        with zipfile.ZipFile(filepath, 'r') as z:
-            files = z.namelist()
-            if not any(f in ['clients.db', 'users.db'] for f in files):
-                filepath.unlink()
-                await wait.edit_text("❌ В архиве нет clients.db или users.db")
-                await state.clear()
-                return
+        # Проверяем структуру бэкапа
+        issues = check_backup_structure(str(filepath))
         
-        await wait.edit_text(f"✅ Загружен: {filename[:30]}... ({filepath.stat().st_size//1024} KB)")
+        size_kb = filepath.stat().st_size // 1024
+        
+        if issues:
+            warning = "\n⚠️ ПРОБЛЕМЫ:\n" + "\n".join(issues)
+            await wait_msg.edit_text(
+                f"⚠️ Файл загружен, но есть проблемы:\n\n"
+                f"Имя: {filename}\n"
+                f"Размер: {size_kb} KB{warning}\n\n"
+                f"Исправь файл и загрузи снова."
+            )
+            # Не удаляем файл, чтобы админ мог его скачать и посмотреть
+        else:
+            await wait_msg.edit_text(
+                f"✅ ZIP файл успешно загружен!\n\n"
+                f"Имя: {filename}\n"
+                f"Размер: {size_kb} KB\n"
+                f"Структура: ✅ корректна"
+            )
+        
         await state.clear()
         
         # Показываем обновленный список бэкапов
-        global backup_map
-        backup_map.clear()
-        
         backups = get_all_backups()
         created = [b for b in backups if b.startswith('backup_')]
         uploaded = [b for b in backups if b.startswith('uploaded_')]
@@ -2704,8 +2757,7 @@ async def handle_upload(message: Message, state: FSMContext):
         
         buttons = []
         for i, b in enumerate(all_backups[:10], 1):
-            index_key = str(i)
-            backup_map[index_key] = b
+            safe_name = b.replace('.', '_dot_').replace('-', '_dash_').replace('_', '__')[:50]
             try:
                 size = (BACKUP_DIR / b).stat().st_size // 1024
                 icon = "📦" if b.startswith('backup_') else "📤"
@@ -2715,12 +2767,12 @@ async def handle_upload(message: Message, state: FSMContext):
                     short_name = b[9:20] + "..."
                 buttons.append([InlineKeyboardButton(
                     text=f"{icon} {short_name} ({size} KB)",
-                    callback_data=f"restore_{index_key}"
+                    callback_data=f"restore_{safe_name}"
                 )])
             except:
                 buttons.append([InlineKeyboardButton(
                     text=f"{'📦' if b.startswith('backup_') else '📤'} {b[:15]}...",
-                    callback_data=f"restore_{index_key}"
+                    callback_data=f"restore_{safe_name}"
                 )])
         
         manage = []
@@ -2738,7 +2790,7 @@ async def handle_upload(message: Message, state: FSMContext):
         await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         
     except Exception as e:
-        await wait.edit_text(f"❌ Ошибка: {str(e)}")
+        await wait_msg.edit_text(f"❌ Ошибка: {str(e)}")
         await state.clear()
 
 @dp.callback_query(lambda c: c.data == "cleanup_backups")
@@ -3125,6 +3177,7 @@ async def main():
     print("   • 📑 Пагинация в админке")
     print("   • 📢 Исправлена рассылка")
     print("   • 🔧 Исправлена ошибка со скачиванием")
+    print("   • 🔍 Проверка структуры бэкапов")
     print("="*50)
     
     try:
