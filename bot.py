@@ -3,13 +3,11 @@ import os
 import asyncio
 import json
 import sqlite3
-import random
 import shutil
 import zipfile
 import hashlib
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
@@ -17,29 +15,60 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# ========== НАСТРОЙКИ ==========
-# Пробуем получить токен из разных источников
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("token") or os.getenv("TOKEN")
-ADMIN_ID = 5809098591
-CREATOR_USERNAME = "@Strann1k_fiol"
+# ========== НАСТРОЙКИ ДЛЯ BOTHOST.RU ==========
+# На bothost.ru токен берется из переменной окружения BOT_TOKEN
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 if not BOT_TOKEN:
-    print("="*50)
-    print("❌ КРИТИЧЕСКАЯ ОШИБКА: ТОКЕН БОТА НЕ НАЙДЕН!")
-    print("="*50)
-    print("🔧 ЧТО ДЕЛАТЬ НА BOTHOST.RU:")
-    print("1. Зайди в панель управления bothost.ru")
-    print("2. Найди раздел 'Переменные окружения'")
-    print("3. Добавь переменную:")
+    print("="*60)
+    print("❌ ОШИБКА: ТОКЕН БОТА НЕ НАЙДЕН!")
+    print("="*60)
+    print("🔧 Инструкция для bothost.ru:")
+    print("1. Зайдите в панель управления bothost.ru")
+    print("2. Откройте раздел 'Переменные окружения'")
+    print("3. Добавьте новую переменную:")
     print("   Имя: BOT_TOKEN")
-    print("   Значение: твой_токен_от_BotFather")
-    print("4. Нажми 'Сохранить' и перезапусти бота")
-    print("="*50)
-    print("📋 Доступные переменные:", list(os.environ.keys()))
-    print("="*50)
+    print("   Значение: ваш_токен_от_BotFather")
+    print("4. Сохраните и перезапустите бота")
+    print("="*60)
+    print("Доступные переменные окружения:")
+    for key in os.environ.keys():
+        print(f"  - {key}")
+    print("="*60)
     raise ValueError("BOT_TOKEN не найден в переменных окружения!")
 
-print(f"✅ Токен загружен (длина: {len(BOT_TOKEN)})")
+# Пробуем подключиться к Telegram для проверки токена
+try:
+    import asyncio
+    from aiogram import Bot
+    
+    async def test_token():
+        bot = Bot(token=BOT_TOKEN)
+        me = await bot.get_me()
+        print(f"✅ Токен работает! Бот: @{me.username}")
+        await bot.session.close()
+        return me
+    
+    # Создаем временный цикл событий для проверки
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    bot_info = loop.run_until_complete(test_token())
+    loop.close()
+    print(f"✅ Подключение к Telegram установлено")
+    
+except Exception as e:
+    print("="*60)
+    print(f"❌ ОШИБКА ПОДКЛЮЧЕНИЯ: {e}")
+    print("="*60)
+    print("🔧 Возможные причины:")
+    print("1. Токен указан неверно")
+    print("2. Токен устарел (нужно создать новый у @BotFather)")
+    print("3. Проблемы с сетью на хостинге")
+    print("="*60)
+    raise
+
+ADMIN_ID = 5809098591
+CREATOR_USERNAME = "@Strann1k_fiol"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,7 +91,6 @@ print(f"📁 Папка бэкапов: {BACKUP_DIR}")
 
 # ========== ИНИЦИАЛИЗАЦИЯ БАЗ ДАННЫХ ==========
 def init_db():
-    """Создание базы данных клиентов"""
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     
@@ -127,7 +155,6 @@ def init_db():
     print("✅ База данных клиентов готова")
 
 def init_users_db():
-    """Создание базы данных пользователей"""
     conn = sqlite3.connect(str(USERS_DB_PATH))
     cur = conn.cursor()
     
@@ -149,9 +176,7 @@ def init_users_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             referrer_id INTEGER NOT NULL,
             referred_id INTEGER NOT NULL UNIQUE,
-            referred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (referrer_id) REFERENCES users(user_id),
-            FOREIGN KEY (referred_id) REFERENCES users(user_id)
+            referred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -161,8 +186,7 @@ def init_users_db():
             user_id INTEGER NOT NULL,
             item_type TEXT NOT NULL,
             item_id INTEGER NOT NULL,
-            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
+            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -170,7 +194,6 @@ def init_users_db():
     conn.close()
     print("✅ База данных пользователей готова")
 
-# Инициализация
 init_db()
 init_users_db()
 
@@ -2085,15 +2108,6 @@ async def main():
     print("   • 🔧 Исправлена пагинация")
     print("   • 🔧 Исправлены бэкапы (теперь работают)")
     print("="*50)
-    
-    # Проверяем подключение к Telegram
-    try:
-        me = await bot.get_me()
-        print(f"✅ Подключение к Telegram успешно! Бот: @{me.username}")
-    except Exception as e:
-        print(f"❌ Ошибка подключения к Telegram: {e}")
-        print("Проверь токен в переменных окружения на bothost.ru")
-        return
     
     await dp.start_polling(bot)
 
