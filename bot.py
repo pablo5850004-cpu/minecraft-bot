@@ -60,7 +60,6 @@ def init_db():
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
-        # Убрали short_desc из всех таблиц
         cur.execute('''
             CREATE TABLE IF NOT EXISTS clients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,6 +348,28 @@ def get_item(table: str, item_id: int):
         cur.execute(f'SELECT * FROM {table} WHERE id = ?', (item_id,))
         item = cur.fetchone()
         conn.close()
+        
+        if item:
+            item_list = list(item)
+            if table == "clients":
+                if len(item_list) > 6 and item_list[6] is not None:
+                    item_list[6] = int(item_list[6])
+                if len(item_list) > 7 and item_list[7] is not None:
+                    item_list[7] = int(item_list[7])
+            elif table == "resourcepacks":
+                if len(item_list) > 7 and item_list[7] is not None:
+                    item_list[7] = int(item_list[7])
+                if len(item_list) > 8 and item_list[8] is not None:
+                    item_list[8] = int(item_list[8])
+                if len(item_list) > 9 and item_list[9] is not None:
+                    item_list[9] = int(item_list[9])
+            elif table == "configs":
+                if len(item_list) > 6 and item_list[6] is not None:
+                    item_list[6] = int(item_list[6])
+                if len(item_list) > 7 and item_list[7] is not None:
+                    item_list[7] = int(item_list[7])
+            
+            return tuple(item_list)
         return item
     except Exception as e:
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
@@ -361,9 +382,17 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10):
         offset = (page - 1) * per_page
         cur.execute(f'SELECT id, name, full_desc, media, downloads, version FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
         items = cur.fetchall()
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                item_list[4] = int(item_list[4])
+            converted_items.append(tuple(item_list))
+        
         total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         conn.close()
-        return items, total
+        return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения элементов {table}: {e}")
         return [], 0
@@ -429,9 +458,19 @@ def get_clients_by_version(version, page=1, per_page=10):
             FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
         ''', (version, per_page, offset))
         items = cur.fetchall()
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                item_list[4] = int(item_list[4])
+            if len(item_list) > 5 and item_list[5] is not None:
+                item_list[5] = int(item_list[5])
+            converted_items.append(tuple(item_list))
+        
         total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
-        return items, total
+        return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения клиентов по версии {version}: {e}")
         return [], 0
@@ -499,9 +538,21 @@ def get_packs_by_version(version, page=1, per_page=10):
             FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
         ''', (version, per_page, offset))
         items = cur.fetchall()
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                item_list[4] = int(item_list[4])
+            if len(item_list) > 5 and item_list[5] is not None:
+                item_list[5] = int(item_list[5])
+            if len(item_list) > 6 and item_list[6] is not None:
+                item_list[6] = int(item_list[6])
+            converted_items.append(tuple(item_list))
+        
         total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
-        return items, total
+        return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения ресурспаков по версии {version}: {e}")
         return [], 0
@@ -569,9 +620,19 @@ def get_configs_by_version(version, page=1, per_page=10):
             FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
         ''', (version, per_page, offset))
         items = cur.fetchall()
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                item_list[4] = int(item_list[4])
+            if len(item_list) > 5 and item_list[5] is not None:
+                item_list[5] = int(item_list[5])
+            converted_items.append(tuple(item_list))
+        
         total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
-        return items, total
+        return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения конфигов по версии {version}: {e}")
         return [], 0
@@ -620,8 +681,18 @@ def get_favorites(user_id):
             WHERE f.user_id = ? ORDER BY f.added_at DESC
         ''', (user_id,))
         favs = cur.fetchall()
+        
+        converted_favs = []
+        for fav in favs:
+            fav_list = list(fav)
+            if len(fav_list) > 4 and fav_list[4] is not None:
+                fav_list[4] = int(fav_list[4])
+            if len(fav_list) > 5 and fav_list[5] is not None:
+                fav_list[5] = int(fav_list[5])
+            converted_favs.append(tuple(fav_list))
+        
         conn.close()
-        return favs
+        return converted_favs
     except Exception as e:
         logger.error(f"Ошибка получения избранного: {e}")
         return []
@@ -700,17 +771,31 @@ async def restore_from_zip(zip_path):
         logger.error(f"Ошибка восстановления: {e}")
         return False
 
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ФОРМАТИРОВАНИЯ ==========
 def format_number(num):
+    """Безопасное форматирование чисел"""
     if num is None:
         return "0"
-    if num < 1000: 
-        return str(num)
-    elif num < 1000000: 
-        return f"{num/1000:.1f}K"
-    else: 
-        return f"{num/1000000:.1f}M"
+    try:
+        if isinstance(num, str):
+            if num.isdigit():
+                num = int(num)
+            else:
+                try:
+                    num = int(float(num))
+                except:
+                    return "0"
+        num = int(num)
+        if num < 1000:
+            return str(num)
+        elif num < 1000000:
+            return f"{num/1000:.1f}K"
+        else:
+            return f"{num/1000000:.1f}M"
+    except:
+        return "0"
 
+# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_main_keyboard(is_admin=False):
     buttons = [
         [types.KeyboardButton(text="🎮 Клиенты"), types.KeyboardButton(text="🎨 Ресурспаки")],
@@ -1054,7 +1139,7 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
     await callback.answer()
 
-# ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЕТАЛЬНОГО ПРОСМОТРА ==========
 @dp.callback_query(lambda c: c.data.startswith("detail_"))
 async def detail_view(callback: CallbackQuery, state: FSMContext):
     _, category, item_id = callback.data.split("_")
@@ -1071,37 +1156,47 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
         media_list = json.loads(item[4]) if item[4] else []
     except:
         media_list = []
-        logger.error(f"Ошибка парсинга media для {category} {item_id}")
     
+    is_fav = False
     if category == "clients":
-        text = f"🎮 {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[6])}\n👁 Просмотров: {format_number(item[7])}"
+        downloads = int(item[6]) if len(item) > 6 and item[6] else 0
+        views = int(item[7]) if len(item) > 7 and item[7] else 0
+        text = f"🎮 {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+    
     elif category == "packs":
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         is_fav = cur.execute('SELECT 1 FROM favorites WHERE user_id = ? AND pack_id = ?', (callback.from_user.id, item_id)).fetchone()
         conn.close()
-        text = f"🎨 {item[1]}\n\n{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[7])}\n❤️ В избранном: {format_number(item[8])}\n👁 Просмотров: {format_number(item[9])}"
-    else:
-        text = f"⚙️ {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(item[6])}\n👁 Просмотров: {format_number(item[7])}"
+        
+        downloads = int(item[7]) if len(item) > 7 and item[7] else 0
+        likes = int(item[8]) if len(item) > 8 and item[8] else 0
+        views = int(item[9]) if len(item) > 9 and item[9] else 0
+        text = f"🎨 {item[1]}\n\n{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
+    
+    else:  # configs
+        downloads = int(item[6]) if len(item) > 6 and item[6] else 0
+        views = int(item[7]) if len(item) > 7 and item[7] else 0
+        text = f"⚙️ {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
     
     if media_list and media_list[0]['type'] == 'photo':
         try:
             await callback.message.answer_photo(
                 photo=media_list[0]['id'], 
                 caption=text, 
-                reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False)
+                reply_markup=get_detail_keyboard(category, item_id, is_fav)
             )
             await callback.message.delete()
         except Exception as e:
             logger.error(f"Ошибка отправки фото: {e}")
             await callback.message.edit_text(
                 text + "\n\n❌ Фото недоступно", 
-                reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False)
+                reply_markup=get_detail_keyboard(category, item_id, is_fav)
             )
     else:
         await callback.message.edit_text(
             text, 
-            reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False)
+            reply_markup=get_detail_keyboard(category, item_id, is_fav)
         )
     
     await callback.answer()
@@ -1183,7 +1278,8 @@ async def show_favorites(message: Message):
         return
     text = "❤️ Твоё избранное:\n\n"
     for fav in favs[:10]:
-        text += f"• {fav[1]} - {format_number(fav[4])} 📥\n"
+        downloads = int(fav[4]) if fav[4] else 0
+        text += f"• {fav[1]} - {format_number(downloads)} 📥\n"
     await message.answer(text)
 
 @dp.callback_query(lambda c: c.data.startswith("fav_"))
@@ -2206,7 +2302,8 @@ async def list_clients(callback: CallbackQuery):
     else:
         text = f"📋 Список клиентов (стр 1/{total_pages}):\n\n"
         for item_id, name, full_desc, media_json, downloads, version in items:
-            text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+            downloads = int(downloads) if downloads else 0
+            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2232,7 +2329,8 @@ async def list_clients_page(callback: CallbackQuery):
     
     text = f"📋 Список клиентов (стр {page}/{total_pages}):\n\n"
     for item_id, name, full_desc, media_json, downloads, version in items:
-        text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+        downloads = int(downloads) if downloads else 0
+        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2261,7 +2359,8 @@ async def list_packs(callback: CallbackQuery):
     else:
         text = f"📋 Список ресурспаков (стр 1/{total_pages}):\n\n"
         for item_id, name, full_desc, media_json, downloads, version in items:
-            text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+            downloads = int(downloads) if downloads else 0
+            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2287,7 +2386,8 @@ async def list_packs_page(callback: CallbackQuery):
     
     text = f"📋 Список ресурспаков (стр {page}/{total_pages}):\n\n"
     for item_id, name, full_desc, media_json, downloads, version in items:
-        text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+        downloads = int(downloads) if downloads else 0
+        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2316,7 +2416,8 @@ async def list_configs(callback: CallbackQuery):
     else:
         text = f"📋 Список конфигов (стр 1/{total_pages}):\n\n"
         for item_id, name, full_desc, media_json, downloads, version in items:
-            text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+            downloads = int(downloads) if downloads else 0
+            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2342,7 +2443,8 @@ async def list_configs_page(callback: CallbackQuery):
     
     text = f"📋 Список конфигов (стр {page}/{total_pages}):\n\n"
     for item_id, name, full_desc, media_json, downloads, version in items:
-        text += f"{item_id}. {name} ({version})\n   📥 {downloads}\n\n"
+        downloads = int(downloads) if downloads else 0
+        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2710,7 +2812,7 @@ async def admin_stats(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== АДМИН: РАССЫЛКА (ИСПРАВЛЕНО) ==========
+# ========== АДМИН: РАССЫЛКА ==========
 @dp.callback_query(lambda c: c.data == "admin_broadcast")
 async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3016,6 +3118,7 @@ async def main():
     print("   • 🖼️ Редактирование фото")
     print("   • 📑 Пагинация в админке")
     print("   • 📢 Исправлена рассылка")
+    print("   • 🔧 Исправлена ошибка со скачиванием")
     print("="*50)
     
     try:
