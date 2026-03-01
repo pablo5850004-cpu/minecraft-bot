@@ -15,16 +15,27 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ========== НАСТРОЙКИ ==========
+# Пробуем получить токен из разных источников
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("token") or os.getenv("TOKEN")
 ADMIN_ID = 5809098591
 CREATOR = "@Strann1k_fiol"
-if not BOT_TOKEN: raise ValueError("❌ BOT_TOKEN не найден!")
+
+if not BOT_TOKEN:
+    print("❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN не найден!")
+    print("Проверь переменные окружения на bothost.ru")
+    print("Доступные переменные:", list(os.environ.keys()))
+    raise ValueError("BOT_TOKEN не найден в переменных окружения!")
+
+print(f"✅ Токен загружен, длина: {len(BOT_TOKEN)}")
+print(f"👤 Админ ID: {ADMIN_ID}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+# ========== ПУТИ ==========
 DATA_DIR = Path("/app/data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "clients.db"
@@ -32,8 +43,12 @@ USERS_DB = DATA_DIR / "users.db"
 BACKUP_DIR = DATA_DIR / "backups"
 BACKUP_DIR.mkdir(exist_ok=True)
 
+print(f"📁 Папка данных: {DATA_DIR}")
+print(f"📁 Папка бэкапов: {BACKUP_DIR}")
+
 backup_map = {}
 
+# ========== БАЗЫ ДАННЫХ ==========
 def init_dbs():
     for path, queries in [
         (DB_PATH, [
@@ -50,9 +65,12 @@ def init_dbs():
     ]:
         conn = sqlite3.connect(str(path))
         for q in queries: conn.execute(q)
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
+    print("✅ Базы данных готовы")
 init_dbs()
 
+# ========== ФУНКЦИИ БД ==========
 def get_item(table, id):
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
@@ -108,22 +126,26 @@ def add_item(table, **kwargs):
 def update_item(table, id, field, value):
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(f'UPDATE {table} SET {field} = ? WHERE id = ?', (value, id))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def delete_item(table, id):
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(f'DELETE FROM {table} WHERE id = ?', (id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def inc_view(table, id):
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(f'UPDATE {table} SET views = views + 1 WHERE id = ?', (id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def inc_download(table, id):
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(f'UPDATE {table} SET downloads = downloads + 1 WHERE id = ?', (id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def toggle_fav(user_id, pack_id):
     conn = sqlite3.connect(str(DB_PATH))
@@ -132,12 +154,14 @@ def toggle_fav(user_id, pack_id):
     if exists:
         cur.execute('DELETE FROM favorites WHERE user_id = ? AND pack_id = ?', (user_id, pack_id))
         cur.execute('UPDATE resourcepacks SET likes = likes - 1 WHERE id = ?', (pack_id,))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return False
     else:
         cur.execute('INSERT INTO favorites (user_id, pack_id) VALUES (?, ?)', (user_id, pack_id))
         cur.execute('UPDATE resourcepacks SET likes = likes + 1 WHERE id = ?', (pack_id,))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return True
 
 def get_favs(user_id):
@@ -148,6 +172,7 @@ def get_favs(user_id):
     conn.close()
     return f
 
+# ========== ФУНКЦИИ ПОЛЬЗОВАТЕЛЕЙ ==========
 def get_users_count():
     conn = sqlite3.connect(str(USERS_DB))
     c = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
@@ -178,7 +203,8 @@ def save_user(msg):
             conn.execute('UPDATE users SET invites = invites + 1 WHERE user_id = ?', (ref,))
     else:
         conn.execute('UPDATE users SET username=?, first_name=?, last_name=?, last_active=CURRENT_TIMESTAMP WHERE user_id=?', (un, fn, ln, uid))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def user_status(uid):
     conn = sqlite3.connect(str(USERS_DB))
@@ -189,11 +215,14 @@ def user_status(uid):
 def inc_user_downloads(uid):
     conn = sqlite3.connect(str(USERS_DB))
     conn.execute('UPDATE users SET downloads_total = downloads_total + 1, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', (uid,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     conn = sqlite3.connect(str(USERS_DB))
     conn.execute('INSERT INTO downloads_log (user_id, item_type, item_id) VALUES (?,?,?)', (uid, 'download', 0))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
+# ========== ФУНКЦИИ БЭКАПОВ ==========
 def get_backups():
     try:
         f = [f for f in os.listdir(str(BACKUP_DIR)) if f.endswith('.zip')]
@@ -224,15 +253,26 @@ async def restore_zip(path):
         return ok
     except: return False
 
+def get_file_key(name): return hashlib.md5(name.encode()).hexdigest()[:8]
+
 def fmt_num(n):
     if n < 1000: return str(n)
     if n < 1000000: return f"{n/1000:.1f}K"
     return f"{n/1000000:.1f}M"
 
+# ========== СОСТОЯНИЯ ==========
 class States(StatesGroup):
-    add_name = State(); add_desc = State(); add_ver = State(); add_url = State(); add_media = State()
-    edit_val = State(); broadcast_t = State(); broadcast_p = State(); wait_backup = State()
+    add_name = State()
+    add_desc = State()
+    add_ver = State()
+    add_url = State()
+    add_media = State()
+    edit_val = State()
+    broadcast_t = State()
+    broadcast_p = State()
+    wait_backup = State()
 
+# ========== КЛАВИАТУРЫ ==========
 def main_kb(admin=False):
     kb = [["🎮 Клиенты", "🎨 Ресурспаки"], ["❤️ Избранное", "⚙️ Конфиги", "👤 Профиль"], ["ℹ️ Инфо", "❓ Помощь"]]
     if admin: kb.append(["⚙️ Админ панель"])
@@ -273,13 +313,14 @@ def det_kb(cat, id, fav=False):
     btns.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"back_{cat}")])
     return InlineKeyboardMarkup(inline_keyboard=btns)
 
+# ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(CommandStart())
 async def start(msg: Message):
     save_user(msg)
     await msg.answer("👋 Привет! Я бот-каталог Minecraft\n\nИспользуй кнопки ниже:", reply_markup=main_kb(msg.from_user.id == ADMIN_ID))
 
 @dp.message(F.text == "🎮 Клиенты")
-async def clients(msg: Message, state: FSMContext):
+async def clients(msg: Message):
     v = get_versions('clients')
     await msg.answer("🎮 Выбери версию:" if v else "📭 Пока нет клиентов", reply_markup=ver_kb(v, 'clients') if v else None)
 
@@ -301,15 +342,18 @@ async def favs(msg: Message):
 @dp.message(F.text == "👤 Профиль")
 async def profile(msg: Message):
     s = user_status(msg.from_user.id)
-    botu = (await bot.me()).username
+    try:
+        botu = (await bot.me()).username
+    except:
+        botu = "bot"
     await msg.answer(f"👋 Привет, {msg.from_user.first_name}!\n\nСтатус: {'👑 СОЗДАТЕЛЬ' if s['is_admin'] else '👤 ПОЛЬЗОВАТЕЛЬ'}\nID: {msg.from_user.id}\n📥 Скачиваний: {s['downloads']}\n👥 Приглашений: {s['invites']}\n\nТвоя ссылка: https://t.me/{botu}?start=ref_{msg.from_user.id}",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📊 Статистика", callback_data="stats")]]))
 
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(msg: Message):
-    c = sqlite3.connect(str(DB_PATH))
-    await msg.answer(f"Инфо\n\nСоздатель: {CREATOR}\n👤 Пользователей: {get_users_count()}\n🎮 Клиентов: {c.execute('SELECT COUNT(*) FROM clients').fetchone()[0]}\n🎨 Ресурспаков: {c.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]}\n⚙️ Конфигов: {c.execute('SELECT COUNT(*) FROM configs').fetchone()[0]}\n📦 Бэкапов: {len(get_backups())}")
-    c.close()
+    conn = sqlite3.connect(str(DB_PATH))
+    await msg.answer(f"ℹ️ Инфо\n\nСоздатель: {CREATOR}\n👤 Пользователей: {get_users_count()}\n🎮 Клиентов: {conn.execute('SELECT COUNT(*) FROM clients').fetchone()[0]}\n🎨 Ресурспаков: {conn.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]}\n⚙️ Конфигов: {conn.execute('SELECT COUNT(*) FROM configs').fetchone()[0]}\n📦 Бэкапов: {len(get_backups())}")
+    conn.close()
 
 @dp.message(F.text == "❓ Помощь")
 async def help(msg: Message):
@@ -321,7 +365,7 @@ async def admin(msg: Message):
     btns = [[InlineKeyboardButton(text=x[0], callback_data=x[1])] for x in [("🎮 Клиенты", "adm_clients"), ("🎨 Ресурспаки", "adm_packs"), ("⚙️ Конфиги", "adm_configs"), ("📦 Бэкапы", "adm_backups"), ("📊 Статистика", "adm_stats"), ("📢 Рассылка", "adm_broadcast")]]
     await msg.answer("⚙️ Админ панель", reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
 
-# Callback handlers
+# ========== CALLBACK ХЕНДЛЕРЫ ==========
 @dp.callback_query(lambda c: c.data.startswith("ver_"))
 async def ver_selected(call: CallbackQuery, state: FSMContext):
     _, cat, ver = call.data.split("_", 2)
@@ -416,9 +460,7 @@ async def back_profile(call: CallbackQuery):
     await profile(call.message)
     await call.answer()
 
-# Admin backup handlers
-def get_file_key(name): return hashlib.md5(name.encode()).hexdigest()[:8]
-
+# ========== АДМИН БЭКАПЫ ==========
 @dp.callback_query(lambda c: c.data == "adm_backups")
 async def adm_backups(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
@@ -427,14 +469,29 @@ async def adm_backups(call: CallbackQuery):
     created = [b for b in backs if b.startswith('backup_')]
     uploaded = [b for b in backs if b.startswith('uploaded_')]
     allb = created + uploaded
-    text = f"📦 Бэкапы ({len(allb)})\n\n" + "\n".join([f"{i}. {b[:20]}... ({(BACKUP_DIR/b).stat().st_size//1024} KB)" for i,b in enumerate(allb[:10],1)]) if allb else "📦 Бэкапов нет"
+    text = f"📦 Бэкапы ({len(allb)})\n\n"
+    if allb:
+        for i,b in enumerate(allb[:10],1):
+            try:
+                size = (BACKUP_DIR/b).stat().st_size//1024
+                text += f"{i}. {b[:20]}... ({size} KB)\n"
+            except:
+                text += f"{i}. {b[:20]}... (ошибка)\n"
+    else:
+        text += "❌ Бэкапов нет"
+    
     btns = []
     for b in allb[:10]:
         key = get_file_key(b)
         backup_map[key] = b
         icon = "📦" if b.startswith('backup_') else "📤"
-        size = (BACKUP_DIR/b).stat().st_size//1024
-        btns.append([InlineKeyboardButton(text=f"{icon} {b[7:20] if b.startswith('backup_') else b[9:20]}... ({size} KB)", callback_data=f"restore_{key}")])
+        try:
+            size = (BACKUP_DIR/b).stat().st_size//1024
+            short = b[7:20] if b.startswith('backup_') else b[9:20]
+            btns.append([InlineKeyboardButton(text=f"{icon} {short}... ({size} KB)", callback_data=f"restore_{key}")])
+        except:
+            btns.append([InlineKeyboardButton(text=f"{icon} {b[:15]}...", callback_data=f"restore_{key}")])
+    
     cbtns = []
     if allb: cbtns.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup"))
     cbtns.extend([InlineKeyboardButton(text="📥 Создать", callback_data="create_bkp"), InlineKeyboardButton(text="📤 Загрузить", callback_data="upload_bkp")])
@@ -463,8 +520,12 @@ async def restore(call: CallbackQuery):
     if not name: await call.answer("❌ Не найден"); return
     path = BACKUP_DIR / name
     if not path.exists(): await call.answer("❌ Файл отсутствует"); return
-    size = path.stat().st_size//1024
-    date = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+    try:
+        size = path.stat().st_size//1024
+        date = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+    except:
+        size = 0
+        date = "?"
     icon = "📦" if name.startswith('backup_') else "📤"
     btns = [[InlineKeyboardButton(text="✅ Да", callback_data=f"restore_confirm_{key}"), InlineKeyboardButton(text="❌ Нет", callback_data="adm_backups")]]
     await call.message.edit_text(f"{icon} Восстановить {name[:20]}...?\n\nРазмер: {size} KB\nДата: {date}\n\n❗ Данные будут заменены!", reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
@@ -498,47 +559,59 @@ async def handle_upload(msg: Message, state: FSMContext):
     if not msg.document or not msg.document.file_name.endswith('.zip'):
         await msg.answer("❌ Нужен ZIP"); await state.clear(); return
     wait = await msg.answer("⏳ Загрузка...")
-    file = await bot.get_file(msg.document.file_id)
-    name = f"uploaded_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{msg.document.file_name.replace('.zip','')[:20]}.zip"
-    path = BACKUP_DIR / name
-    await bot.download_file(file.file_path, str(path))
     try:
+        file = await bot.get_file(msg.document.file_id)
+        name = f"uploaded_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{msg.document.file_name.replace('.zip','')[:20]}.zip"
+        path = BACKUP_DIR / name
+        await bot.download_file(file.file_path, str(path))
+        
         with zipfile.ZipFile(path, 'r') as z:
             if not any(f in ['clients.db','users.db'] for f in z.namelist()):
                 path.unlink()
                 await wait.edit_text("❌ Нет clients.db/users.db")
                 await state.clear()
                 return
-    except:
-        path.unlink()
-        await wait.edit_text("❌ Файл поврежден")
+        await wait.edit_text(f"✅ Загружен: {name[:30]}... ({path.stat().st_size//1024} KB)")
         await state.clear()
-        return
-    await wait.edit_text(f"✅ Загружен: {name[:30]}... ({path.stat().st_size//1024} KB)")
-    await state.clear()
-    await adm_backups_type(msg)
-
-async def adm_backups_type(msg: Message):
-    backup_map.clear()
-    backs = get_backups()
-    created = [b for b in backs if b.startswith('backup_')]
-    uploaded = [b for b in backs if b.startswith('uploaded_')]
-    allb = created + uploaded
-    text = f"📦 Бэкапы ({len(allb)})\n\n" + "\n".join([f"{i}. {b[:20]}... ({(BACKUP_DIR/b).stat().st_size//1024} KB)" for i,b in enumerate(allb[:10],1)]) if allb else "📦 Бэкапов нет"
-    btns = []
-    for b in allb[:10]:
-        key = get_file_key(b)
-        backup_map[key] = b
-        icon = "📦" if b.startswith('backup_') else "📤"
-        size = (BACKUP_DIR/b).stat().st_size//1024
-        btns.append([InlineKeyboardButton(text=f"{icon} {b[7:20] if b.startswith('backup_') else b[9:20]}... ({size} KB)", callback_data=f"restore_{key}")])
-    cbtns = []
-    if allb: cbtns.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup"))
-    cbtns.extend([InlineKeyboardButton(text="📥 Создать", callback_data="create_bkp"), InlineKeyboardButton(text="📤 Загрузить", callback_data="upload_bkp")])
-    if cbtns: btns.append(cbtns)
-    btns.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm_backups")])
-    btns.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
-    await msg.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
+        
+        backup_map.clear()
+        backs = get_backups()
+        created = [b for b in backs if b.startswith('backup_')]
+        uploaded = [b for b in backs if b.startswith('uploaded_')]
+        allb = created + uploaded
+        text = f"📦 Бэкапы ({len(allb)})\n\n"
+        if allb:
+            for i,b in enumerate(allb[:10],1):
+                try:
+                    size = (BACKUP_DIR/b).stat().st_size//1024
+                    text += f"{i}. {b[:20]}... ({size} KB)\n"
+                except:
+                    text += f"{i}. {b[:20]}... (ошибка)\n"
+        else:
+            text += "❌ Бэкапов нет"
+        
+        btns = []
+        for b in allb[:10]:
+            key = get_file_key(b)
+            backup_map[key] = b
+            icon = "📦" if b.startswith('backup_') else "📤"
+            try:
+                size = (BACKUP_DIR/b).stat().st_size//1024
+                short = b[7:20] if b.startswith('backup_') else b[9:20]
+                btns.append([InlineKeyboardButton(text=f"{icon} {short}... ({size} KB)", callback_data=f"restore_{key}")])
+            except:
+                btns.append([InlineKeyboardButton(text=f"{icon} {b[:15]}...", callback_data=f"restore_{key}")])
+        
+        cbtns = []
+        if allb: cbtns.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup"))
+        cbtns.extend([InlineKeyboardButton(text="📥 Создать", callback_data="create_bkp"), InlineKeyboardButton(text="📤 Загрузить", callback_data="upload_bkp")])
+        if cbtns: btns.append(cbtns)
+        btns.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="adm_backups")])
+        btns.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+        await msg.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=btns))
+    except Exception as e:
+        await wait.edit_text(f"❌ Ошибка: {str(e)}")
+        await state.clear()
 
 @dp.callback_query(lambda c: c.data == "cleanup")
 async def cleanup(call: CallbackQuery):
@@ -593,9 +666,25 @@ async def back_main(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Главное меню:", reply_markup=main_kb(call.from_user.id == ADMIN_ID))
     await call.answer()
 
+# ========== ЗАПУСК ==========
 async def main():
-    print("✅ Бот запущен")
+    print("="*50)
+    print("✅ Бот запускается...")
+    print(f"👤 Админ ID: {ADMIN_ID}")
+    print(f"📁 Папка данных: {DATA_DIR}")
+    print("="*50)
+    try:
+        me = await bot.me()
+        print(f"🤖 Бот: @{me.username}")
+    except Exception as e:
+        print(f"⚠️ Ошибка получения информации о боте: {e}")
+        print("Проверь токен в переменных окружения на bothost.ru")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("⛔ Бот остановлен")
+    except Exception as e:
+        print(f"❌ Критическая ошибка: {e}")
