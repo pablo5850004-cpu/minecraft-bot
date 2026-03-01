@@ -8,7 +8,6 @@ import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 from typing import List, Dict, Optional, Tuple
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
@@ -17,24 +16,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# ========== ЗАГРУЗКА ТОКЕНА ИЗ .ENV ФАЙЛА ==========
-# Сначала проверяем папку /app/data (постоянное хранилище)
-env_path = Path("/app/data/.env")
-if env_path.exists():
-    load_dotenv(env_path)
-    print(f"✅ Загружены переменные из {env_path}")
-else:
-    # Если нет, пробуем загрузить из текущей папки
-    load_dotenv()
-    print("⚠️ Файл .env не найден в /app/data, использую переменные окружения")
-
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
 
 if not BOT_TOKEN:
-    raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения или .env файле!")
+    raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1978,7 +1966,6 @@ async def main():
     print("   • 📊 Статистика скачиваний")
     print("   • 🔧 Исправлена кнопка Инфо")
     print("   • 🔧 Исправлена пагинация")
-    print("   • 🔑 Поддержка .env файла для токена")
     print("="*50)
     await dp.start_polling(bot)
 
