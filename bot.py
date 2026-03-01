@@ -17,12 +17,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = os.getenv('BOT_TOKEN')
+BOT_TOKEN = "8732938464:AAHIsqjKA8wFCcK8iQi1FRGokH6cf8ypSmY"
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
 
 if not BOT_TOKEN:
-    raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
+    raise ValueError("❌ Ошибка: BOT_TOKEN не найден!")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -164,6 +164,9 @@ def init_users_db():
 init_db()
 init_users_db()
 
+# ========== СЛОВАРЬ ДЛЯ БЭКАПОВ ==========
+backup_map = {}
+
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ ==========
 def get_users_count() -> int:
     """Получить количество пользователей"""
@@ -272,7 +275,7 @@ def add_referral(referrer_id: int, referred_id: int):
         return False
 
 def save_user(message: Message):
-    """Сохранить пользователя с проверкой реферальной ссылки"""
+    """Сохранить пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -321,7 +324,6 @@ def save_user(message: Message):
 
 # ========== ОБЩИЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД ==========
 def get_item(table: str, item_id: int):
-    """Получить элемент по ID"""
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'SELECT * FROM {table} WHERE id = ?', (item_id,))
@@ -330,7 +332,6 @@ def get_item(table: str, item_id: int):
     return item
 
 def get_all_items(table: str):
-    """Получить все элементы"""
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'SELECT id, name, short_desc, media, downloads, version FROM {table} ORDER BY created_at DESC')
@@ -339,7 +340,6 @@ def get_all_items(table: str):
     return items
 
 def delete_item(table: str, item_id: int):
-    """Удалить элемент"""
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     cur.execute(f'DELETE FROM {table} WHERE id = ?', (item_id,))
@@ -705,17 +705,6 @@ def get_broadcast_confirm_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_backups_keyboard():
-    backups = get_all_backups()
-    buttons = []
-    for backup in backups[:5]:
-        size = (BACKUP_DIR / backup).stat().st_size // 1024
-        buttons.append([InlineKeyboardButton(text=f"📦 {backup[:20]}... ({size} KB)", callback_data=f"restore_{backup}")])
-    buttons.append([InlineKeyboardButton(text="📥 Создать бэкап", callback_data="create_backup")])
-    buttons.append([InlineKeyboardButton(text="📤 Загрузить ZIP", callback_data="upload_backup")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -803,21 +792,16 @@ async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
 # ========== ПРОФИЛЬ ==========
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: Message):
-    """Показать приветственный профиль"""
     try:
         user_id = message.from_user.id
         first_name = message.from_user.first_name or "пользователь"
-        
-        # Получаем информацию о пользователе
         status_data = get_user_status(user_id)
         
-        # Определяем статус
         if user_id == ADMIN_ID:
             status_text = "👑 СОЗДАТЕЛЬ"
         else:
             status_text = "👤 ПОЛЬЗОВАТЕЛЬ"
         
-        # Реферальная ссылка
         bot_info = await bot.me()
         bot_username = bot_info.username
         ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
@@ -826,101 +810,56 @@ async def show_profile(message: Message):
             f"👋 Привет, {first_name}! ❤️\n\n"
             f"Мой любимый пользователь!\n\n"
             f"🎉 Этот бот абсолютно бесплатный!\n"
-            f"Никаких лимитов, никаких ограничений — качай сколько хочешь!\n\n"
+            f"Никаких лимитов!\n\n"
             f"Твоя статистика:\n"
             f"• Статус: {status_text}\n"
             f"• ID: {user_id}\n"
             f"• Всего скачиваний: {status_data.get('downloads_total', 0)}\n"
             f"• Приглашено друзей: {status_data.get('invites', 0)}\n\n"
-            f"🤗 Мне будет очень приятно, если ты поделишься ботом с друзьями!\n\n"
             f"Твоя ссылка для приглашения:\n"
-            f"{ref_link}\n\n"
-            f"Просто отправь её друзьям. Спасибо, что ты с нами! 💖"
+            f"{ref_link}"
         )
         
-        # Кнопки для профиля
         buttons = [
             [InlineKeyboardButton(text="📊 Моя статистика", callback_data="profile_stats")],
-            [InlineKeyboardButton(text="📋 Мои скачивания", callback_data="profile_downloads")],
-            [InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Привет! Отличный бот с клиентами для Minecraft!")]
+            [InlineKeyboardButton(text="📋 Мои скачивания", callback_data="profile_downloads")]
         ]
         
-        await message.answer(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
+        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     except Exception as e:
         logger.error(f"Ошибка в профиле: {e}")
-        await message.answer(
-            "👋 Привет!\n\n"
-            "🎉 Этот бот абсолютно бесплатный!\n\n"
-            f"Ссылка для приглашения:\n"
-            f"https://t.me/{(await bot.me()).username}"
-        )
+        await message.answer("👋 Привет!\n\n🎉 Этот бот абсолютно бесплатный!")
 
 @dp.callback_query(lambda c: c.data == "profile_stats")
 async def profile_stats(callback: CallbackQuery):
-    """Показать статистику пользователя"""
     try:
         user_id = callback.from_user.id
-        
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        
-        # Количество скачиваний
-        cur.execute('SELECT COUNT(*) FROM downloads_log WHERE user_id = ?', (user_id,))
-        total_downloads = cur.fetchone()[0]
-        
-        # Количество приглашений
-        cur.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (user_id,))
-        total_invites = cur.fetchone()[0]
-        
-        # Последние скачивания
-        cur.execute('''
-            SELECT item_type, downloaded_at FROM downloads_log 
-            WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 5
-        ''', (user_id,))
-        recent = cur.fetchall()
-        
+        total_downloads = cur.execute('SELECT COUNT(*) FROM downloads_log WHERE user_id = ?', (user_id,)).fetchone()[0]
+        total_invites = cur.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (user_id,)).fetchone()[0]
+        recent = cur.execute('SELECT item_type, downloaded_at FROM downloads_log WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 5', (user_id,)).fetchall()
         conn.close()
         
-        text = f"Твоя статистика\n\n"
-        text += f"📥 Всего скачиваний: {total_downloads}\n"
-        text += f"👥 Приглашено друзей: {total_invites}\n\n"
-        
+        text = f"Твоя статистика\n\n📥 Всего скачиваний: {total_downloads}\n👥 Приглашено друзей: {total_invites}\n\n"
         if recent:
             text += "Последние скачивания:\n"
             for item_type, date in recent:
-                date_str = date[:10] if date else "недавно"
-                text += f"• {item_type} - {date_str}\n"
+                text += f"• {item_type} - {date[:10] if date else 'недавно'}\n"
         
-        await callback.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]
-            ])
-        )
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]]))
     except Exception as e:
         logger.error(f"Ошибка в статистике профиля: {e}")
-        await callback.message.edit_text(
-            "❌ Ошибка загрузки статистики"
-        )
+        await callback.message.edit_text("❌ Ошибка загрузки статистики")
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "profile_downloads")
 async def profile_downloads(callback: CallbackQuery):
-    """Показать историю скачиваний"""
     try:
         user_id = callback.from_user.id
-        
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        
-        cur.execute('''
-            SELECT item_type, item_id, downloaded_at FROM downloads_log 
-            WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 10
-        ''', (user_id,))
-        downloads = cur.fetchall()
+        downloads = cur.execute('SELECT item_type, item_id, downloaded_at FROM downloads_log WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 10', (user_id,)).fetchall()
         conn.close()
         
         if not downloads:
@@ -928,25 +867,16 @@ async def profile_downloads(callback: CallbackQuery):
         else:
             text = "Твои скачивания:\n\n"
             for i, (item_type, item_id, date) in enumerate(downloads, 1):
-                date_str = date[:10] if date else "недавно"
-                text += f"{i}. {item_type} (ID: {item_id}) - {date_str}\n"
+                text += f"{i}. {item_type} (ID: {item_id}) - {date[:10] if date else 'недавно'}\n"
         
-        await callback.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]
-            ])
-        )
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]]))
     except Exception as e:
         logger.error(f"Ошибка в истории скачиваний: {e}")
-        await callback.message.edit_text(
-            "❌ Ошибка загрузки истории"
-        )
+        await callback.message.edit_text("❌ Ошибка загрузки истории")
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "back_to_profile")
 async def back_to_profile(callback: CallbackQuery):
-    """Вернуться в профиль"""
     await show_profile(callback.message)
     await callback.answer()
 
@@ -984,10 +914,7 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
     
     total_pages = max(1, (total + 9) // 10)
     await state.update_data({f"{category}_page": page})
-    await callback.message.edit_text(
-        f"{title} (стр {page}/{total_pages}):",
-        reply_markup=get_items_keyboard(items, category, page, total_pages)
-    )
+    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
     await callback.answer()
 
 # ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
@@ -1008,7 +935,6 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     if category == "clients":
         text = f"{item[1]}\n\n{item[3]}\n\nВерсия: {item[6]}\n📥 Скачиваний: {format_number(item[7])}\n👁 Просмотров: {format_number(item[8])}"
     elif category == "packs":
-        # Проверяем избранное
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         is_fav = cur.execute('SELECT 1 FROM favorites WHERE user_id = ? AND pack_id = ?', (callback.from_user.id, item_id)).fetchone()
@@ -1060,16 +986,12 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         page = 1
     
     total_pages = max(1, (total + 9) // 10)
-    await callback.message.edit_text(
-        f"{title} (стр {page}/{total_pages}):",
-        reply_markup=get_items_keyboard(items, category, page, total_pages)
-    )
+    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
     await callback.answer()
 
 # ========== СКАЧИВАНИЕ ==========
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_item(callback: CallbackQuery):
-    """Скачивание без лимитов"""
     _, category, item_id = callback.data.split("_")
     item_id = int(item_id)
     user_id = callback.from_user.id
@@ -1079,17 +1001,13 @@ async def download_item(callback: CallbackQuery):
         await callback.answer("❌ Не найден", show_alert=True)
         return
     
-    # Увеличиваем счётчик скачиваний
     increment_download(category, item_id)
     increment_download_count(user_id)
     
-    # Логируем скачивание
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        cur.execute('''
-            INSERT INTO downloads_log (user_id, item_type, item_id) VALUES (?, ?, ?)
-        ''', (user_id, category, item_id))
+        cur.execute('INSERT INTO downloads_log (user_id, item_type, item_id) VALUES (?, ?, ?)', (user_id, category, item_id))
         conn.commit()
         conn.close()
     except:
@@ -1098,9 +1016,7 @@ async def download_item(callback: CallbackQuery):
     url = item[5]
     name = item[1]
     
-    await callback.message.answer(
-        f"📥 Скачать {name}\n\n{url}"
-    )
+    await callback.message.answer(f"📥 Скачать {name}\n\n{url}")
     await callback.answer("✅ Ссылка отправлена!")
 
 # ========== ИЗБРАННОЕ ==========
@@ -1129,7 +1045,6 @@ async def favorite_handler(callback: CallbackQuery):
 # ========== ИНФО ==========
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: Message):
-    """Информация о боте"""
     try:
         users_count = get_users_count()
         backups_count = len(get_all_backups())
@@ -1144,7 +1059,7 @@ async def info(message: Message):
         text = (
             f"Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 14.2\n\n"
+            f"Версия: 15.0\n\n"
             f"Статистика:\n"
             f"• Пользователей: {users_count}\n"
             f"• Клиентов: {clients_count}\n"
@@ -1158,29 +1073,20 @@ async def info(message: Message):
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(
-            f"Информация о боте\n\n"
-            f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 14.2"
-        )
+        await message.answer(f"Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 15.0")
 
 # ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
     await message.answer(
-        "❓ Помощь и поддержка\n\n"
-        "Если у тебя возникли вопросы:\n\n"
-        "• Нажми кнопку ниже, чтобы связаться с создателем",
+        "❓ Помощь и поддержка\n\nЕсли у тебя возникли вопросы:\n\n• Нажми кнопку ниже, чтобы связаться с создателем",
         reply_markup=get_help_keyboard()
     )
 
 @dp.callback_query(lambda c: c.data == "help_rules")
 async def help_rules(callback: CallbackQuery):
     await callback.message.edit_text(
-        "📋 Правила использования\n\n"
-        "1. Все файлы предоставляются 'как есть'\n"
-        "2. Автор не несёт ответственности за использование файлов\n"
-        "3. Уважайте других пользователей",
+        "📋 Правила использования\n\n1. Все файлы предоставляются 'как есть'\n2. Автор не несёт ответственности за использование файлов\n3. Уважайте других пользователей",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
     )
     await callback.answer()
@@ -1188,13 +1094,7 @@ async def help_rules(callback: CallbackQuery):
 @dp.callback_query(lambda c: c.data == "help_faq")
 async def help_faq(callback: CallbackQuery):
     await callback.message.edit_text(
-        "❓ Часто задаваемые вопросы\n\n"
-        "Q: Как скачать файл?\n"
-        "A: Нажми на элемент, затем кнопку 'Скачать'\n\n"
-        "Q: Есть ли лимиты?\n"
-        "A: Нет! Бот полностью бесплатный, качай сколько хочешь!\n\n"
-        "Q: Как сделать бэкап?\n"
-        "A: В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'",
+        "❓ Часто задаваемые вопросы\n\nQ: Как скачать файл?\nA: Нажми на элемент, затем кнопку 'Скачать'\n\nQ: Есть ли лимиты?\nA: Нет! Бот полностью бесплатный, качай сколько хочешь!\n\nQ: Как сделать бэкап?\nA: В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
     )
     await callback.answer()
@@ -1202,9 +1102,7 @@ async def help_faq(callback: CallbackQuery):
 @dp.callback_query(lambda c: c.data == "back_to_help")
 async def back_to_help(callback: CallbackQuery):
     await callback.message.edit_text(
-        "❓ Помощь и поддержка\n\n"
-        "Если у тебя возникли вопросы:\n\n"
-        "• Нажми кнопку ниже, чтобы связаться с создателем",
+        "❓ Помощь и поддержка\n\nЕсли у тебя возникли вопросы:\n\n• Нажми кнопку ниже, чтобы связаться с создателем",
         reply_markup=get_help_keyboard()
     )
     await callback.answer()
@@ -1306,9 +1204,7 @@ async def client_url(message: Message, state: FSMContext):
     await state.update_data(client_url=message.text)
     await state.set_state(AdminStates.client_media)
     await message.answer(
-        "🖼️ Отправляй фото (можно несколько)\n\n"
-        "После того как отправишь все фото, напиши готово\n"
-        "Или напиши пропустить чтобы пропустить фото:"
+        "🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши готово\nИли напиши пропустить чтобы пропустить фото:"
     )
 
 @dp.message(AdminStates.client_media)
@@ -1516,9 +1412,7 @@ async def pack_url(message: Message, state: FSMContext):
     await state.update_data(pack_url=message.text)
     await state.set_state(AdminStates.pack_media)
     await message.answer(
-        "🖼️ Отправляй фото (можно несколько)\n\n"
-        "После того как отправишь все фото, напиши готово\n"
-        "Или напиши пропустить чтобы пропустить фото:"
+        "🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши готово\nИли напиши пропустить чтобы пропустить фото:"
     )
 
 @dp.message(AdminStates.pack_media)
@@ -1590,9 +1484,7 @@ async def config_url(message: Message, state: FSMContext):
     await state.update_data(config_url=message.text)
     await state.set_state(AdminStates.config_media)
     await message.answer(
-        "🖼️ Отправляй фото (можно несколько)\n\n"
-        "После того как отправишь все фото, напиши готово\n"
-        "Или напиши пропустить чтобы пропустить фото:"
+        "🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши готово\nИли напиши пропустить чтобы пропустить фото:"
     )
 
 @dp.message(AdminStates.config_media)
@@ -1646,18 +1538,52 @@ async def edit_value(message: Message, state: FSMContext):
         update_client(item_id, field, message.text)
     
     await state.clear()
-    await message.answer(
-        "✅ Значение обновлено!",
-        reply_markup=get_main_keyboard(is_admin=True)
-    )
+    await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
 
-# ========== АДМИН: БЭКАПЫ ==========
+# ========== АДМИН: БЭКАПЫ (ИСПРАВЛЕНО) ==========
 @dp.callback_query(lambda c: c.data == "admin_zip_backups")
 async def admin_zip_backups(callback: CallbackQuery):
+    """Меню ZIP бэкапов"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    await callback.message.edit_text("📦 ZIP Бэкапы\n\nУправление бэкапами:", reply_markup=get_backups_keyboard())
+    
+    global backup_map
+    backup_map.clear()  # Очищаем старые соответствия
+    
+    backups = get_all_backups()
+    text = "📦 ZIP Бэкапы\n\n"
+    text += f"Всего бэкапов: {len(backups)}\n\n"
+    
+    if backups:
+        text += "Доступные бэкапы:\n"
+        for i, backup in enumerate(backups[:5], 1):
+            size = (BACKUP_DIR / backup).stat().st_size // 1024
+            short_name = backup[:30] + "..." if len(backup) > 30 else backup
+            text += f"{i}. {short_name} ({size} KB)\n"
+    else:
+        text += "❌ Бэкапов пока нет!\n"
+    
+    # Создаём кнопки с короткими ID
+    buttons = []
+    for i, backup in enumerate(backups[:5], 1):
+        short_id = f"bkp_{i}"
+        backup_map[short_id] = backup  # Сохраняем соответствие
+        size = (BACKUP_DIR / backup).stat().st_size // 1024
+        short_name = backup[:15] + "..." if len(backup) > 15 else backup
+        buttons.append([InlineKeyboardButton(
+            text=f"{i}. {short_name} ({size} KB)",
+            callback_data=f"restore_{short_id}"
+        )])
+    
+    buttons.append([
+        InlineKeyboardButton(text="📥 Создать бэкап", callback_data="create_backup"),
+        InlineKeyboardButton(text="📤 Загрузить ZIP", callback_data="upload_backup")
+    ])
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_zip_backups")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "create_backup")
@@ -1675,34 +1601,75 @@ async def create_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_"))
 async def restore_backup(callback: CallbackQuery):
+    """Восстановление из бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    filename = callback.data.replace("restore_", "")
+    
+    short_id = callback.data.replace("restore_", "")
+    
+    # Получаем имя файла из словаря
+    filename = backup_map.get(short_id)
+    if not filename:
+        await callback.answer("❌ Бэкап не найден. Обнови список.", show_alert=True)
+        return
+    
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
         await callback.answer("❌ Файл не найден", show_alert=True)
         return
+    
+    file_size = filepath.stat().st_size // 1024
+    
     buttons = [
-        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{filename}")],
+        [InlineKeyboardButton(text="✅ Да, восстановить", callback_data=f"restore_confirm_{short_id}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_zip_backups")]
     ]
-    await callback.message.edit_text(f"⚠️ Восстановить из {filename}?\n\nВсе текущие данные будут заменены!", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    
+    await callback.message.edit_text(
+        f"⚠️ Восстановить из {filename}?\n\nРазмер: {file_size} KB\nВсе текущие данные будут заменены!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("restore_confirm_"))
 async def restore_confirm(callback: CallbackQuery):
+    """Подтверждение восстановления"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    filename = callback.data.replace("restore_confirm_", "")
+    
+    short_id = callback.data.replace("restore_confirm_", "")
+    
+    filename = backup_map.get(short_id)
+    if not filename:
+        await callback.answer("❌ Бэкап не найден", show_alert=True)
+        return
+    
     filepath = BACKUP_DIR / filename
+    
     await callback.message.edit_text("⏳ Восстановление...")
+    
+    # Сначала создаём бэкап текущего состояния
+    await create_zip_backup()
+    
+    # Восстанавливаем
     success = await restore_from_zip(str(filepath))
+    
     if success:
-        await callback.message.edit_text("✅ База восстановлена!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]]))
+        await callback.message.edit_text(
+            "✅ База восстановлена!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
+            ])
+        )
     else:
-        await callback.message.edit_text("❌ Ошибка восстановления!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]]))
+        await callback.message.edit_text(
+            "❌ Ошибка восстановления!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]
+            ])
+        )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "upload_backup")
@@ -1748,12 +1715,7 @@ async def admin_stats(callback: CallbackQuery):
     conn.close()
     
     await callback.message.edit_text(
-        f"📊 Статистика\n\n"
-        f"👤 Пользователей: {users_count}\n"
-        f"🎮 Клиентов: {clients_count}\n"
-        f"🎨 Ресурспаков: {packs_count}\n"
-        f"⚙️ Конфигов: {configs_count}\n"
-        f"📦 Бэкапов: {backups_count}",
+        f"📊 Статистика\n\n👤 Пользователей: {users_count}\n🎮 Клиентов: {clients_count}\n🎨 Ресурспаков: {packs_count}\n⚙️ Конфигов: {configs_count}\n📦 Бэкапов: {backups_count}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
     )
     await callback.answer()
@@ -1765,17 +1727,9 @@ async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    try:
-        users_count = get_users_count()
-    except:
-        users_count = 0
-    
+    users_count = get_users_count()
     await state.set_state(AdminStates.broadcast_text)
-    await callback.message.edit_text(
-        f"📢 Создание рассылки\n\n"
-        f"Всего пользователей: {users_count}\n\n"
-        f"Введи текст сообщения для рассылки:"
-    )
+    await callback.message.edit_text(f"📢 Создание рассылки\n\nВсего пользователей: {users_count}\n\nВведи текст сообщения для рассылки:")
     await callback.answer()
 
 @dp.message(AdminStates.broadcast_text)
@@ -1841,10 +1795,7 @@ async def broadcast_send(callback: CallbackQuery, state: FSMContext):
     sent = 0
     failed = 0
     
-    await callback.message.edit_text(
-        f"📢 Рассылка началась...\n\n"
-        f"Всего пользователей: {len(users)}"
-    )
+    await callback.message.edit_text(f"📢 Рассылка началась...\n\nВсего пользователей: {len(users)}")
     
     for user_id in users:
         try:
@@ -1860,24 +1811,15 @@ async def broadcast_send(callback: CallbackQuery, state: FSMContext):
     
     await state.clear()
     await callback.message.edit_text(
-        f"📢 Рассылка завершена!\n\n"
-        f"✅ Отправлено: {sent}\n"
-        f"❌ Не доставлено: {failed}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
-        ])
+        f"📢 Рассылка завершена!\n\n✅ Отправлено: {sent}\n❌ Не доставлено: {failed}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
     )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "broadcast_cancel")
 async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(
-        "❌ Рассылка отменена",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
-        ])
-    )
+    await callback.message.edit_text("❌ Рассылка отменена", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]]))
     await callback.answer()
 
 # ========== МЕДИА ==========
@@ -1966,6 +1908,7 @@ async def main():
     print("   • 📊 Статистика скачиваний")
     print("   • 🔧 Исправлена кнопка Инфо")
     print("   • 🔧 Исправлена пагинация")
+    print("   • 🔧 Исправлены бэкапы (короткие ID)")
     print("="*50)
     await dp.start_polling(bot)
 
