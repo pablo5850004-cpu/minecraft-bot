@@ -6,6 +6,7 @@ import sqlite3
 import random
 import shutil
 import zipfile
+import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
@@ -17,12 +18,28 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Пробуем получить токен из разных источников
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("token") or os.getenv("TOKEN")
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
 
 if not BOT_TOKEN:
-    raise ValueError("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
+    print("="*50)
+    print("❌ КРИТИЧЕСКАЯ ОШИБКА: ТОКЕН БОТА НЕ НАЙДЕН!")
+    print("="*50)
+    print("🔧 ЧТО ДЕЛАТЬ НА BOTHOST.RU:")
+    print("1. Зайди в панель управления bothost.ru")
+    print("2. Найди раздел 'Переменные окружения'")
+    print("3. Добавь переменную:")
+    print("   Имя: BOT_TOKEN")
+    print("   Значение: твой_токен_от_BotFather")
+    print("4. Нажми 'Сохранить' и перезапусти бота")
+    print("="*50)
+    print("📋 Доступные переменные:", list(os.environ.keys()))
+    print("="*50)
+    raise ValueError("BOT_TOKEN не найден в переменных окружения!")
+
+print(f"✅ Токен загружен (длина: {len(BOT_TOKEN)})")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1523,8 +1540,6 @@ async def edit_value(message: Message, state: FSMContext):
     await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
 
 # ========== АДМИН: БЭКАПЫ (ИСПРАВЛЕНО) ==========
-import hashlib
-
 def get_file_key(filename):
     """Создает безопасный ключ для файла"""
     return hashlib.md5(filename.encode()).hexdigest()[:8]
@@ -1740,65 +1755,68 @@ async def handle_upload(message: Message, state: FSMContext):
         
         await wait.edit_text(f"✅ Загружен: {filename[:30]}... ({filepath.stat().st_size//1024} KB)")
         await state.clear()
-        await admin_zip_backups_type(message)
+        
+        # Показываем обновленный список бэкапов
+        global backup_map
+        backup_map.clear()
+        
+        backups = get_all_backups()
+        created = [b for b in backups if b.startswith('backup_')]
+        uploaded = [b for b in backups if b.startswith('uploaded_')]
+        all_backups = created + uploaded
+        
+        text = "📦 ZIP Бэкапы\n\n"
+        text += f"Всего бэкапов: {len(all_backups)}\n\n"
+        
+        if all_backups:
+            for i, b in enumerate(all_backups[:10], 1):
+                try:
+                    size = (BACKUP_DIR / b).stat().st_size // 1024
+                    if b.startswith('backup_'):
+                        display = b.replace('backup_', '📦 ').replace('.zip', '')
+                    else:
+                        display = b.replace('uploaded_', '📤 ').replace('.zip', '')
+                    text += f"{i}. {display[:30]}... ({size} KB)\n"
+                except:
+                    text += f"{i}. {b[:30]}... (ошибка)\n"
+        else:
+            text += "❌ Бэкапов пока нет!\n"
+        
+        buttons = []
+        for i, b in enumerate(all_backups[:10], 1):
+            file_key = get_file_key(b)
+            backup_map[file_key] = b
+            try:
+                size = (BACKUP_DIR / b).stat().st_size // 1024
+                icon = "📦" if b.startswith('backup_') else "📤"
+                short = b[7:20] if b.startswith('backup_') else b[9:20]
+                buttons.append([InlineKeyboardButton(
+                    text=f"{icon} {short}... ({size} KB)",
+                    callback_data=f"restore_{file_key}"
+                )])
+            except:
+                buttons.append([InlineKeyboardButton(
+                    text=f"{'📦' if b.startswith('backup_') else '📤'} {b[:15]}...",
+                    callback_data=f"restore_{file_key}"
+                )])
+        
+        manage = []
+        if all_backups:
+            manage.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup_backups"))
+        manage.extend([
+            InlineKeyboardButton(text="📥 Создать", callback_data="create_backup"),
+            InlineKeyboardButton(text="📤 Загрузить", callback_data="upload_backup")
+        ])
+        if manage:
+            buttons.append(manage)
+        buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_zip_backups")])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+        
+        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
         
     except Exception as e:
         await wait.edit_text(f"❌ Ошибка: {str(e)}")
         await state.clear()
-
-async def admin_zip_backups_type(message: Message):
-    global backup_map
-    backup_map.clear()
-    
-    backups = get_all_backups()
-    created = [b for b in backups if b.startswith('backup_')]
-    uploaded = [b for b in backups if b.startswith('uploaded_')]
-    all_backups = created + uploaded
-    
-    text = "📦 ZIP Бэкапы\n\n"
-    text += f"Всего бэкапов: {len(all_backups)}\n\n"
-    
-    if all_backups:
-        for i, b in enumerate(all_backups[:10], 1):
-            try:
-                size = (BACKUP_DIR / b).stat().st_size // 1024
-                text += f"{i}. {b[:25]}... ({size} KB)\n"
-            except:
-                text += f"{i}. {b[:25]}...\n"
-    else:
-        text += "❌ Бэкапов нет"
-    
-    buttons = []
-    for i, b in enumerate(all_backups[:10], 1):
-        file_key = get_file_key(b)
-        backup_map[file_key] = b
-        try:
-            size = (BACKUP_DIR / b).stat().st_size // 1024
-            icon = "📦" if b.startswith('backup_') else "📤"
-            short = b[7:20] if b.startswith('backup_') else b[9:20]
-            buttons.append([InlineKeyboardButton(
-                text=f"{icon} {short}... ({size} KB)",
-                callback_data=f"restore_{file_key}"
-            )])
-        except:
-            buttons.append([InlineKeyboardButton(
-                text=f"{'📦' if b.startswith('backup_') else '📤'} {b[:15]}...",
-                callback_data=f"restore_{file_key}"
-            )])
-    
-    manage = []
-    if all_backups:
-        manage.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup_backups"))
-    manage.extend([
-        InlineKeyboardButton(text="📥 Создать", callback_data="create_backup"),
-        InlineKeyboardButton(text="📤 Загрузить", callback_data="upload_backup")
-    ])
-    if manage:
-        buttons.append(manage)
-    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_zip_backups")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
-    
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @dp.callback_query(lambda c: c.data == "cleanup_backups")
 async def cleanup_backups(callback: CallbackQuery):
@@ -2067,7 +2085,22 @@ async def main():
     print("   • 🔧 Исправлена пагинация")
     print("   • 🔧 Исправлены бэкапы (теперь работают)")
     print("="*50)
+    
+    # Проверяем подключение к Telegram
+    try:
+        me = await bot.get_me()
+        print(f"✅ Подключение к Telegram успешно! Бот: @{me.username}")
+    except Exception as e:
+        print(f"❌ Ошибка подключения к Telegram: {e}")
+        print("Проверь токен в переменных окружения на bothost.ru")
+        return
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("⛔ Бот остановлен")
+    except Exception as e:
+        print(f"❌ Критическая ошибка: {e}")
