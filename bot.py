@@ -775,16 +775,10 @@ def check_backup_structure(zip_path):
         with zipfile.ZipFile(zip_path, 'r') as zipf:
             files = zipf.namelist()
             
-            # Проверяем наличие нужных файлов
             if 'clients.db' not in files:
                 issues.append("❌ Отсутствует файл clients.db")
             if 'users.db' not in files:
                 issues.append("❌ Отсутствует файл users.db")
-            
-            # Если есть файлы, проверяем их структуру (опционально)
-            if 'clients.db' in files:
-                # Здесь можно добавить проверку структуры БД
-                pass
             
         return issues
     except Exception as e:
@@ -1258,7 +1252,7 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
     await callback.answer()
 
-# ========== СКАЧИВАНИЕ ==========
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ СКАЧИВАНИЯ ==========
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_item(callback: CallbackQuery):
     _, category, item_id = callback.data.split("_")
@@ -1282,8 +1276,19 @@ async def download_item(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Ошибка логирования скачивания: {e}")
     
-    url = item[5]
-    name = item[1]
+    # Правильные индексы для каждой таблицы
+    if category == "clients":
+        # clients: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), downloads(6), views(7)
+        url = item[4]
+        name = item[1]
+    elif category == "packs":
+        # resourcepacks: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), author(6), downloads(7), likes(8), views(9)
+        url = item[4]
+        name = item[1]
+    else:  # configs
+        # configs: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), downloads(6), views(7)
+        url = item[4]
+        name = item[1]
     
     await callback.message.answer(f"📥 Скачать {name}\n\n{url}")
     await callback.answer("✅ Ссылка отправлена!")
@@ -1387,7 +1392,8 @@ async def admin_panel(message: Message):
 
 @dp.callback_query(lambda c: c.data == "admin_back")
 async def admin_back(callback: CallbackQuery):
-    await callback.message.edit_text("⚙️ Админ панель\n\nВыбери категорию:", reply_markup=get_admin_main_keyboard())
+    await callback.message.answer("⚙️ Админ панель\n\nВыбери категорию:", reply_markup=get_admin_main_keyboard())
+    await callback.message.delete()
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "admin_clients")
@@ -2478,7 +2484,7 @@ async def list_configs_page(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== АДМИН: БЭКАПЫ С ПРОВЕРКОЙ СТРУКТУРЫ ==========
+# ========== ИСПРАВЛЕННЫЙ КОД ДЛЯ БЭКАПОВ ==========
 @dp.callback_query(lambda c: c.data == "admin_zip_backups")
 async def admin_zip_backups(callback: CallbackQuery):
     """Меню ZIP бэкапов"""
@@ -2488,7 +2494,6 @@ async def admin_zip_backups(callback: CallbackQuery):
     
     backups = get_all_backups()
     
-    # Сортируем бэкапы
     created = [b for b in backups if b.startswith('backup_')]
     uploaded = [b for b in backups if b.startswith('uploaded_')]
     all_backups = created + uploaded
@@ -2510,10 +2515,8 @@ async def admin_zip_backups(callback: CallbackQuery):
     else:
         text += "❌ Бэкапов пока нет!\n"
     
-    # Создаём кнопки - передаем ПОЛНОЕ ИМЯ ФАЙЛА в callback_data
     buttons = []
     for i, b in enumerate(all_backups[:10], 1):
-        # Кодируем имя файла для безопасной передачи
         safe_name = b.replace('.', '_dot_').replace('-', '_dash_').replace('_', '__')[:50]
         
         try:
@@ -2533,7 +2536,6 @@ async def admin_zip_backups(callback: CallbackQuery):
                 callback_data=f"restore_{safe_name}"
             )])
     
-    # Кнопки управления
     manage = []
     if all_backups:
         manage.append(InlineKeyboardButton(text="🗑 Очистить", callback_data="cleanup_backups"))
@@ -2575,12 +2577,11 @@ async def create_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_") and not c.data.startswith("restore_confirm_"))
 async def restore_backup(callback: CallbackQuery):
-    """Восстановление из бэкапа с проверкой структуры"""
+    """Восстановление из бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    # Декодируем имя файла
     safe_name = callback.data.replace("restore_", "")
     filename = safe_name.replace('_dot_', '.').replace('_dash_', '-').replace('__', '_')
     
@@ -2589,7 +2590,6 @@ async def restore_backup(callback: CallbackQuery):
         await callback.answer(f"❌ Файл {filename} не найден", show_alert=True)
         return
     
-    # Проверяем структуру бэкапа
     issues = check_backup_structure(str(filepath))
     
     try:
@@ -2602,14 +2602,12 @@ async def restore_backup(callback: CallbackQuery):
     icon = "📦" if filename.startswith('backup_') else "📤"
     display = filename.replace('backup_', '').replace('uploaded_', '').replace('.zip', '')
     
-    # Если есть проблемы, показываем предупреждение
     if issues:
         warning_text = "\n\n⚠️ ПРОБЛЕМЫ С БЭКАПОМ:\n" + "\n".join(issues)
         warning_text += "\n\nВосстановление может работать некорректно!"
     else:
         warning_text = ""
     
-    # Снова кодируем для подтверждения
     safe_name = filename.replace('.', '_dot_').replace('-', '_dash_').replace('_', '__')[:50]
     
     buttons = [
@@ -2630,7 +2628,6 @@ async def restore_confirm(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    # Декодируем имя файла
     safe_name = callback.data.replace("restore_confirm_", "")
     filename = safe_name.replace('_dot_', '.').replace('_dash_', '-').replace('__', '_')
     
@@ -2675,7 +2672,7 @@ async def upload_backup(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_backup)
 async def handle_upload(message: Message, state: FSMContext):
-    """Обработка загруженного файла с проверкой структуры"""
+    """Обработка загруженного файла"""
     if message.from_user.id != ADMIN_ID:
         await state.clear()
         return
@@ -2696,11 +2693,9 @@ async def handle_upload(message: Message, state: FSMContext):
     wait_msg = await message.answer("⏳ Загрузка файла...")
     
     try:
-        # Скачиваем файл
         file = await bot.get_file(message.document.file_id)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Сохраняем с оригинальным именем + префикс
         original_name = message.document.file_name.replace('.zip', '')
         safe_name = "".join(c for c in original_name if c.isalnum() or c in '._- ')[:30]
         filename = f"uploaded_{timestamp}_{safe_name}.zip"
@@ -2708,7 +2703,6 @@ async def handle_upload(message: Message, state: FSMContext):
         
         await bot.download_file(file.file_path, str(filepath))
         
-        # Проверяем структуру бэкапа
         issues = check_backup_structure(str(filepath))
         
         size_kb = filepath.stat().st_size // 1024
@@ -2721,7 +2715,6 @@ async def handle_upload(message: Message, state: FSMContext):
                 f"Размер: {size_kb} KB{warning}\n\n"
                 f"Исправь файл и загрузи снова."
             )
-            # Не удаляем файл, чтобы админ мог его скачать и посмотреть
         else:
             await wait_msg.edit_text(
                 f"✅ ZIP файл успешно загружен!\n\n"
@@ -2732,7 +2725,6 @@ async def handle_upload(message: Message, state: FSMContext):
         
         await state.clear()
         
-        # Показываем обновленный список бэкапов
         backups = get_all_backups()
         created = [b for b in backups if b.startswith('backup_')]
         uploaded = [b for b in backups if b.startswith('uploaded_')]
