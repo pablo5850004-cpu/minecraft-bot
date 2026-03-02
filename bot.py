@@ -7,7 +7,7 @@ import shutil
 import zipfile
 import base64
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
@@ -34,6 +34,8 @@ if not BOT_TOKEN:
 
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
+ADMIN_BOT_LINK = "https://t.me/Strann1k_fiol"  # Ссылка на Telegram админа Ссылка на бота для связи с админом
+VIP_PRICE = 49  # Стоимость VIP в рублях
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,6 +70,7 @@ def init_db():
                 media TEXT DEFAULT '[]',
                 download_url TEXT NOT NULL,
                 version TEXT,
+                is_vip INTEGER DEFAULT 0,
                 downloads INTEGER DEFAULT 0,
                 views INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -83,6 +86,7 @@ def init_db():
                 download_url TEXT NOT NULL,
                 version TEXT,
                 author TEXT,
+                is_vip INTEGER DEFAULT 0,
                 downloads INTEGER DEFAULT 0,
                 likes INTEGER DEFAULT 0,
                 views INTEGER DEFAULT 0,
@@ -98,6 +102,7 @@ def init_db():
                 media TEXT DEFAULT '[]',
                 download_url TEXT NOT NULL,
                 version TEXT,
+                is_vip INTEGER DEFAULT 0,
                 downloads INTEGER DEFAULT 0,
                 views INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -130,6 +135,8 @@ def init_users_db():
                 username TEXT,
                 first_name TEXT,
                 last_name TEXT,
+                balance INTEGER DEFAULT 0,
+                is_vip INTEGER DEFAULT 0,
                 invites INTEGER DEFAULT 0,
                 downloads_total INTEGER DEFAULT 0,
                 first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -152,7 +159,19 @@ def init_users_db():
                 user_id INTEGER NOT NULL,
                 item_type TEXT NOT NULL,
                 item_id INTEGER NOT NULL,
+                vip_item INTEGER DEFAULT 0,
                 downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS balance_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                admin_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -178,12 +197,36 @@ def get_users_count() -> int:
         logger.error(f"Ошибка получения количества пользователей: {e}")
         return 0
 
+def get_vip_users_count() -> int:
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT COUNT(*) FROM users WHERE is_vip = 1')
+        result = cur.fetchone()
+        conn.close()
+        return result[0] if result else 0
+    except Exception as e:
+        logger.error(f"Ошибка получения количества VIP пользователей: {e}")
+        return 0
+
 def get_all_users() -> list:
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         cur.execute('SELECT user_id FROM users ORDER BY last_active DESC')
         users = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return users
+    except Exception as e:
+        logger.error(f"Ошибка получения списка пользователей: {e}")
+        return []
+
+def get_all_users_with_details() -> list:
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT user_id, username, first_name, balance, is_vip FROM users ORDER BY last_active DESC')
+        users = cur.fetchall()
         conn.close()
         return users
     except Exception as e:
@@ -202,11 +245,13 @@ def get_user_status(user_id: int) -> dict:
             return {
                 'user_id': user_id,
                 'is_admin': (user_id == ADMIN_ID),
+                'balance': 0,
+                'is_vip': False,
                 'invites': 0,
                 'downloads_total': 0
             }
         
-        cur.execute('SELECT user_id, username, invites, downloads_total FROM users WHERE user_id = ?', (user_id,))
+        cur.execute('SELECT user_id, username, balance, is_vip, invites, downloads_total FROM users WHERE user_id = ?', (user_id,))
         user = cur.fetchone()
         
         if not user:
@@ -222,6 +267,8 @@ def get_user_status(user_id: int) -> dict:
             status_data = {
                 'user_id': user_id,
                 'is_admin': (user_id == ADMIN_ID),
+                'balance': 0,
+                'is_vip': False,
                 'invites': 0,
                 'downloads_total': 0
             }
@@ -229,8 +276,10 @@ def get_user_status(user_id: int) -> dict:
             status_data = {
                 'user_id': user[0],
                 'is_admin': (user_id == ADMIN_ID),
-                'invites': user[2] if user[2] is not None else 0,
-                'downloads_total': user[3] if user[3] is not None else 0
+                'balance': user[2] if user[2] is not None else 0,
+                'is_vip': user[3] == 1,
+                'invites': user[4] if user[4] is not None else 0,
+                'downloads_total': user[5] if user[5] is not None else 0
             }
         
         conn.close()
@@ -241,11 +290,152 @@ def get_user_status(user_id: int) -> dict:
         return {
             'user_id': user_id,
             'is_admin': (user_id == ADMIN_ID),
+            'balance': 0,
+            'is_vip': False,
             'invites': 0,
             'downloads_total': 0
         }
 
-def increment_download_count(user_id: int):
+def add_balance(user_id: int, amount: int, admin_id: int = None):
+    """Добавить баланс пользователю"""
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('''
+            UPDATE users SET 
+                balance = COALESCE(balance, 0) + ?,
+                last_active = CURRENT_TIMESTAMP 
+            WHERE user_id = ?
+        ''', (amount, user_id))
+        
+        cur.execute('''
+            INSERT INTO balance_history (user_id, amount, action, admin_id)
+            VALUES (?, ?, 'add', ?)
+        ''', (user_id, amount, admin_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления баланса для {user_id}: {e}")
+        return False
+
+def remove_balance(user_id: int, amount: int, admin_id: int = None):
+    """Списать баланс пользователя"""
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
+        result = cur.fetchone()
+        if not result or result[0] < amount:
+            conn.close()
+            return False
+        
+        cur.execute('''
+            UPDATE users SET 
+                balance = balance - ?,
+                last_active = CURRENT_TIMESTAMP 
+            WHERE user_id = ?
+        ''', (amount, user_id))
+        
+        cur.execute('''
+            INSERT INTO balance_history (user_id, amount, action, admin_id)
+            VALUES (?, ?, 'remove', ?)
+        ''', (user_id, amount, admin_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка списания баланса для {user_id}: {e}")
+        return False
+
+def set_user_vip(user_id: int, admin_id: int = None):
+    """Установить VIP статус пользователю навсегда"""
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('''
+            UPDATE users SET 
+                is_vip = 1,
+                last_active = CURRENT_TIMESTAMP 
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        cur.execute('''
+            INSERT INTO balance_history (user_id, action, admin_id)
+            VALUES (?, 'vip_grant', ?)
+        ''', (user_id, admin_id))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"VIP статус установлен для пользователя {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка установки VIP статуса для {user_id}: {e}")
+        return False
+
+def remove_user_vip(user_id: int, admin_id: int = None):
+    """Снять VIP статус с пользователя"""
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('''
+            UPDATE users SET 
+                is_vip = 0,
+                last_active = CURRENT_TIMESTAMP 
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        cur.execute('''
+            INSERT INTO balance_history (user_id, action, admin_id)
+            VALUES (?, 'vip_remove', ?)
+        ''', (user_id, admin_id))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"VIP статус снят с пользователя {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка снятия VIP статуса для {user_id}: {e}")
+        return False
+
+def buy_vip_with_balance(user_id: int):
+    """Купить VIP за баланс"""
+    try:
+        conn = sqlite3.connect(str(USERS_DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('SELECT balance, is_vip FROM users WHERE user_id = ?', (user_id,))
+        result = cur.fetchone()
+        if not result:
+            conn.close()
+            return False, "Пользователь не найден"
+        
+        balance, is_vip = result
+        if is_vip:
+            conn.close()
+            return False, "У вас уже есть VIP статус"
+        
+        if balance < VIP_PRICE:
+            conn.close()
+            return False, f"Недостаточно средств. Нужно {VIP_PRICE} руб."
+        
+        cur.execute('UPDATE users SET balance = balance - ?, is_vip = 1 WHERE user_id = ?', (VIP_PRICE, user_id))
+        cur.execute('INSERT INTO balance_history (user_id, amount, action) VALUES (?, ?, "vip_purchase")', (user_id, VIP_PRICE))
+        
+        conn.commit()
+        conn.close()
+        return True, f"VIP статус успешно активирован!"
+    except Exception as e:
+        logger.error(f"Ошибка покупки VIP для {user_id}: {e}")
+        return False, "Ошибка при покупке VIP"
+
+def increment_download_count(user_id: int, vip_item: bool = False):
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -353,6 +543,8 @@ def get_item(table: str, item_id: int):
                     item_list[6] = int(item_list[6])
                 if len(item_list) > 7 and item_list[7] is not None:
                     item_list[7] = int(item_list[7])
+                if len(item_list) > 8 and item_list[8] is not None:
+                    item_list[8] = int(item_list[8])
             elif table == "resourcepacks":
                 if len(item_list) > 7 and item_list[7] is not None:
                     item_list[7] = int(item_list[7])
@@ -360,11 +552,15 @@ def get_item(table: str, item_id: int):
                     item_list[8] = int(item_list[8])
                 if len(item_list) > 9 and item_list[9] is not None:
                     item_list[9] = int(item_list[9])
+                if len(item_list) > 10 and item_list[10] is not None:
+                    item_list[10] = int(item_list[10])
             elif table == "configs":
                 if len(item_list) > 6 and item_list[6] is not None:
                     item_list[6] = int(item_list[6])
                 if len(item_list) > 7 and item_list[7] is not None:
                     item_list[7] = int(item_list[7])
+                if len(item_list) > 8 and item_list[8] is not None:
+                    item_list[8] = int(item_list[8])
             
             return tuple(item_list)
         return item
@@ -372,13 +568,27 @@ def get_item(table: str, item_id: int):
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
         return None
 
-def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10):
+def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_filter: str = "all"):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
-        cur.execute(f'SELECT id, name, full_desc, media, downloads, version FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+        
+        if vip_filter == "vip":
+            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+        elif vip_filter == "regular":
+            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+        else:
+            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+        
         items = cur.fetchall()
+        
+        if vip_filter == "vip":
+            total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 1').fetchone()[0]
+        elif vip_filter == "regular":
+            total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 0').fetchone()[0]
+        else:
+            total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         
         converted_items = []
         for item in items:
@@ -387,12 +597,32 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10):
                 item_list[4] = int(item_list[4])
             converted_items.append(tuple(item_list))
         
-        total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         conn.close()
         return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения элементов {table}: {e}")
         return [], 0
+
+def toggle_item_vip(table: str, item_id: int):
+    """Переключить VIP статус элемента"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute(f'SELECT is_vip FROM {table} WHERE id = ?', (item_id,))
+        result = cur.fetchone()
+        
+        if result:
+            new_status = 0 if result[0] == 1 else 1
+            cur.execute(f'UPDATE {table} SET is_vip = ? WHERE id = ?', (new_status, item_id))
+            conn.commit()
+            conn.close()
+            return new_status == 1
+        conn.close()
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка переключения VIP статуса {table} {item_id}: {e}")
+        return False
 
 def delete_item(table: str, item_id: int):
     try:
@@ -405,15 +635,15 @@ def delete_item(table: str, item_id: int):
         logger.error(f"Ошибка удаления элемента {table} {item_id}: {e}")
 
 # ========== ФУНКЦИИ ДЛЯ КЛИЕНТОВ ==========
-def add_client(name, full_desc, url, version, media=None):
+def add_client(name, full_desc, url, version, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO clients (name, full_desc, download_url, version, media)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, media_json))
+            INSERT INTO clients (name, full_desc, download_url, version, is_vip, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, is_vip, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -445,15 +675,27 @@ def update_client_media(item_id: int, media_list: list):
         logger.error(f"Ошибка обновления медиа клиента {item_id}: {e}")
         return False
 
-def get_clients_by_version(version, page=1, per_page=10):
+def get_clients_by_version(version, page=1, per_page=10, user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
-        cur.execute('''
-            SELECT id, name, full_desc, media, downloads, views, version 
-            FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-        ''', (version, per_page, offset))
+        
+        is_admin = (user_id == ADMIN_ID)
+        
+        if is_admin:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+        else:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+        
         items = cur.fetchall()
         
         converted_items = []
@@ -465,17 +707,17 @@ def get_clients_by_version(version, page=1, per_page=10):
                 item_list[5] = int(item_list[5])
             converted_items.append(tuple(item_list))
         
-        total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
         return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения клиентов по версии {version}: {e}")
         return [], 0
 
-def get_all_client_versions():
+def get_all_client_versions(user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        
         cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL ORDER BY version DESC')
         versions = [v[0] for v in cur.fetchall()]
         conn.close()
@@ -485,15 +727,15 @@ def get_all_client_versions():
         return []
 
 # ========== ФУНКЦИИ ДЛЯ РЕСУРСПАКОВ ==========
-def add_pack(name, full_desc, url, version, author, media=None):
+def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO resourcepacks (name, full_desc, download_url, version, author, media)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, author, media_json))
+            INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, media)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, author, is_vip, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -525,15 +767,27 @@ def update_pack_media(item_id: int, media_list: list):
         logger.error(f"Ошибка обновления медиа ресурспака {item_id}: {e}")
         return False
 
-def get_packs_by_version(version, page=1, per_page=10):
+def get_packs_by_version(version, page=1, per_page=10, user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
-        cur.execute('''
-            SELECT id, name, full_desc, media, downloads, likes, views, version, author 
-            FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-        ''', (version, per_page, offset))
+        
+        is_admin = (user_id == ADMIN_ID)
+        
+        if is_admin:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
+                FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+        else:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
+                FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+        
         items = cur.fetchall()
         
         converted_items = []
@@ -547,17 +801,17 @@ def get_packs_by_version(version, page=1, per_page=10):
                 item_list[6] = int(item_list[6])
             converted_items.append(tuple(item_list))
         
-        total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
         return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения ресурспаков по версии {version}: {e}")
         return [], 0
 
-def get_all_pack_versions():
+def get_all_pack_versions(user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        
         cur.execute('SELECT DISTINCT version FROM resourcepacks WHERE version IS NOT NULL ORDER BY version DESC')
         versions = [v[0] for v in cur.fetchall()]
         conn.close()
@@ -567,15 +821,15 @@ def get_all_pack_versions():
         return []
 
 # ========== ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
-def add_config(name, full_desc, url, version, media=None):
+def add_config(name, full_desc, url, version, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
         cur.execute('''
-            INSERT INTO configs (name, full_desc, download_url, version, media)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, media_json))
+            INSERT INTO configs (name, full_desc, download_url, version, is_vip, media)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, full_desc, url, version, is_vip, media_json))
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -607,15 +861,27 @@ def update_config_media(item_id: int, media_list: list):
         logger.error(f"Ошибка обновления медиа конфига {item_id}: {e}")
         return False
 
-def get_configs_by_version(version, page=1, per_page=10):
+def get_configs_by_version(version, page=1, per_page=10, user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
-        cur.execute('''
-            SELECT id, name, full_desc, media, downloads, views, version 
-            FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-        ''', (version, per_page, offset))
+        
+        is_admin = (user_id == ADMIN_ID)
+        
+        if is_admin:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+        else:
+            cur.execute('''
+                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+            ''', (version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+        
         items = cur.fetchall()
         
         converted_items = []
@@ -627,17 +893,17 @@ def get_configs_by_version(version, page=1, per_page=10):
                 item_list[5] = int(item_list[5])
             converted_items.append(tuple(item_list))
         
-        total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
         conn.close()
         return converted_items, total
     except Exception as e:
         logger.error(f"Ошибка получения конфигов по версии {version}: {e}")
         return [], 0
 
-def get_all_config_versions():
+def get_all_config_versions(user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        
         cur.execute('SELECT DISTINCT version FROM configs WHERE version IS NOT NULL ORDER BY version DESC')
         versions = [v[0] for v in cur.fetchall()]
         conn.close()
@@ -672,11 +938,13 @@ def get_favorites(user_id):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        
         cur.execute('''
-            SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes 
+            SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes, r.is_vip 
             FROM resourcepacks r JOIN favorites f ON r.id = f.pack_id
             WHERE f.user_id = ? ORDER BY f.added_at DESC
         ''', (user_id,))
+        
         favs = cur.fetchall()
         
         converted_favs = []
@@ -705,7 +973,7 @@ def increment_view(table, item_id):
     except Exception as e:
         logger.error(f"Ошибка увеличения просмотров: {e}")
 
-def increment_download(table, item_id):
+def increment_download(table, item_id, vip_item=False):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
@@ -809,11 +1077,11 @@ def format_number(num):
         return "0"
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-def get_main_keyboard(is_admin=False):
+def get_main_keyboard(is_admin=False, is_vip=False):
     buttons = [
         [types.KeyboardButton(text="🎮 Клиенты"), types.KeyboardButton(text="🎨 Ресурспаки")],
         [types.KeyboardButton(text="❤️ Избранное"), types.KeyboardButton(text="⚙️ Конфиги"), types.KeyboardButton(text="👤 Профиль")],
-        [types.KeyboardButton(text="ℹ️ Инфо"), types.KeyboardButton(text="❓ Помощь")]
+        [types.KeyboardButton(text="💎 VIP"), types.KeyboardButton(text="ℹ️ Инфо"), types.KeyboardButton(text="❓ Помощь")]
     ]
     if is_admin:
         buttons.append([types.KeyboardButton(text="⚙️ Админ панель")])
@@ -826,6 +1094,7 @@ class AdminStates(StatesGroup):
     client_version = State()
     client_url = State()
     client_media = State()
+    client_vip = State()
     
     pack_name = State()
     pack_full_desc = State()
@@ -833,21 +1102,25 @@ class AdminStates(StatesGroup):
     pack_author = State()
     pack_url = State()
     pack_media = State()
+    pack_vip = State()
     
     config_name = State()
     config_full_desc = State()
     config_version = State()
     config_url = State()
     config_media = State()
+    config_vip = State()
     
     edit_value = State()
     edit_media = State()
     broadcast_text = State()
     broadcast_photo = State()
     waiting_for_backup = State()
+    balance_user_id = State()
+    balance_amount = State()
 
 # ========== КЛАВИАТУРЫ ==========
-def get_version_keyboard(versions, category):
+def get_version_keyboard(versions, category, user_id=None):
     buttons = []
     row = []
     for v in versions:
@@ -859,17 +1132,21 @@ def get_version_keyboard(versions, category):
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_items_keyboard(items, category, page, total_pages):
+def get_items_keyboard(items, category, page, total_pages, show_vip=False):
     buttons = []
     for item in items:
         item_id, name, full_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
         version = item[6] if len(item) > 6 else "?"
+        is_vip = item[7] if len(item) > 7 else 0
+        
         try:
             media_list = json.loads(media_json) if media_json else []
         except:
             media_list = []
+        
         preview = "🖼️" if media_list else "📄"
-        button_text = f"{preview} {name[:30]} ({version})\n📥 {format_number(downloads)}"
+        vip_icon = "💎 " if is_vip and show_vip else ""
+        button_text = f"{preview} {vip_icon}{name[:30]} ({version})\n📥 {format_number(downloads)}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"detail_{category}_{item_id}")])
     
     nav_row = []
@@ -880,16 +1157,29 @@ def get_items_keyboard(items, category, page, total_pages):
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_detail_keyboard(category, item_id, is_favorite=False):
+def get_detail_keyboard(category, item_id, is_favorite=False, is_vip=False, user_is_vip=False, user_is_admin=False):
     buttons = []
+    
+    can_download = not is_vip or user_is_vip or user_is_admin
+    
     if category == "packs":
         fav_text = "❤️" if is_favorite else "🤍"
-        buttons.append([
-            InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}"),
-            InlineKeyboardButton(text=fav_text, callback_data=f"fav_{category}_{item_id}")
-        ])
+        if can_download:
+            buttons.append([
+                InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}"),
+                InlineKeyboardButton(text=fav_text, callback_data=f"fav_{category}_{item_id}")
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton(text="💎 VIP Only", callback_data="vip_only"),
+                InlineKeyboardButton(text=fav_text, callback_data=f"fav_{category}_{item_id}")
+            ])
     else:
-        buttons.append([InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}")])
+        if can_download:
+            buttons.append([InlineKeyboardButton(text="📥 Скачать", callback_data=f"download_{category}_{item_id}")])
+        else:
+            buttons.append([InlineKeyboardButton(text="💎 VIP Only", callback_data="vip_only")])
+    
     buttons.append([InlineKeyboardButton(text="🖼️ Медиа", callback_data=f"media_{category}_{item_id}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"back_{category}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -899,6 +1189,8 @@ def get_admin_main_keyboard():
         [InlineKeyboardButton(text="🎮 Клиенты", callback_data="admin_clients")],
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
         [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
+        [InlineKeyboardButton(text="💰 Управление балансом", callback_data="admin_balance")],
+        [InlineKeyboardButton(text="👑 VIP управление", callback_data="admin_vip")],
         [InlineKeyboardButton(text="📦 ZIP Бэкапы", callback_data="admin_zip_backups")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
@@ -908,9 +1200,11 @@ def get_admin_main_keyboard():
 def get_admin_list_keyboard(items, category, page, total_pages, action):
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version = item
+        item_id, name, full_desc, media_json, downloads, version = item[:6]
+        is_vip = item[6] if len(item) > 6 else 0
+        vip_icon = "💎 " if is_vip else ""
         buttons.append([InlineKeyboardButton(
-            text=f"{item_id}. {name[:30]} ({version}) 📥 {downloads}", 
+            text=f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}", 
             callback_data=f"{action}_{category}_{item_id}"
         )])
     
@@ -940,88 +1234,227 @@ def get_help_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def get_balance_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="balance_add")],
+        [InlineKeyboardButton(text="💎 Купить VIP (49₽)", callback_data="buy_vip_balance")],
+        [InlineKeyboardButton(text="📊 История операций", callback_data="balance_history")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_admin_balance_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="➕ Начислить баланс", callback_data="admin_balance_add")],
+        [InlineKeyboardButton(text="➖ Списать баланс", callback_data="admin_balance_remove")],
+        [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_balance_list")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    is_admin = (message.from_user.id == ADMIN_ID)
+    user_id = message.from_user.id
+    user_status = get_user_status(user_id)
+    is_admin = (user_id == ADMIN_ID)
+    is_vip = user_status.get('is_vip', False)
+    
     save_user(message)
+    
+    welcome_text = "👋 Привет! Я бот-каталог Minecraft\n\n"
+    welcome_text += "🎮 Клиенты - моды и сборки\n"
+    welcome_text += "🎨 Ресурспаки - текстурпаки\n"
+    welcome_text += "❤️ Избранное - сохраняй понравившееся\n"
+    welcome_text += "⚙️ Конфиги - настройки\n"
+    welcome_text += "👤 Профиль - твой профиль и баланс\n"
+    welcome_text += "💎 VIP - эксклюзивный контент\n"
+    welcome_text += "ℹ️ Инфо - о боте и создателе\n"
+    welcome_text += "❓ Помощь - связаться с админом\n\n"
+    
+    if is_vip:
+        welcome_text += "✨ У тебя есть VIP статус! Тебе доступен эксклюзивный контент.\n"
+    
+    welcome_text += "Используй кнопки ниже:"
+    
     await message.answer(
-        "👋 Привет! Я бот-каталог Minecraft\n\n"
-        "🎮 Клиенты - моды и сборки\n"
-        "🎨 Ресурспаки - текстурпаки\n"
-        "❤️ Избранное - сохраняй понравившееся\n"
-        "⚙️ Конфиги - настройки\n"
-        "👤 Профиль - твой профиль\n"
-        "ℹ️ Инфо - о боте и создателе\n"
-        "❓ Помощь - связаться с админом\n\n"
-        "Используй кнопки ниже:",
-        reply_markup=get_main_keyboard(is_admin)
+        welcome_text,
+        reply_markup=get_main_keyboard(is_admin, is_vip)
     )
 
 # ========== КЛИЕНТЫ ==========
 @dp.message(F.text == "🎮 Клиенты")
 async def clients_menu(message: Message, state: FSMContext):
-    versions = get_all_client_versions()
+    user_id = message.from_user.id
+    versions = get_all_client_versions(user_id)
     if not versions:
         await message.answer("📭 Пока нет клиентов")
         return
-    await message.answer("🎮 Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "clients"))
+    await message.answer("🎮 Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "clients", user_id))
 
 @dp.callback_query(lambda c: c.data.startswith("ver_clients_"))
 async def clients_version_selected(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
     version = callback.data.replace("ver_clients_", "")
-    items, total = get_clients_by_version(version, 1)
+    items, total = get_clients_by_version(version, 1, user_id=user_id)
+    
     if not items:
-        await callback.message.edit_text(f"❌ Для версии {version} пока нет клиентов", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет доступных клиентов", 
+                                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
         await callback.answer()
         return
+    
     total_pages = (total + 9) // 10
     await state.update_data(client_version=version, client_page=1)
-    await callback.message.edit_text(f"🎮 Клиенты для версии {version} (стр 1/{total_pages}):", reply_markup=get_items_keyboard(items, "clients", 1, total_pages))
+    
+    has_vip = any(item[7] == 1 for item in items) if len(items[0]) > 7 else False
+    
+    await callback.message.edit_text(
+        f"🎮 Клиенты для версии {version} (стр 1/{total_pages}):", 
+        reply_markup=get_items_keyboard(items, "clients", 1, total_pages, show_vip=True)
+    )
     await callback.answer()
 
 # ========== РЕСУРСПАКИ ==========
 @dp.message(F.text == "🎨 Ресурспаки")
 async def packs_menu(message: Message, state: FSMContext):
-    versions = get_all_pack_versions()
+    user_id = message.from_user.id
+    versions = get_all_pack_versions(user_id)
     if not versions:
         await message.answer("📭 Пока нет ресурспаков")
         return
-    await message.answer("🎨 Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "packs"))
+    await message.answer("🎨 Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "packs", user_id))
 
 @dp.callback_query(lambda c: c.data.startswith("ver_packs_"))
 async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
     version = callback.data.replace("ver_packs_", "")
-    items, total = get_packs_by_version(version, 1)
+    items, total = get_packs_by_version(version, 1, user_id=user_id)
+    
     if not items:
-        await callback.message.edit_text(f"❌ Для версии {version} пока нет ресурспаков", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет доступных ресурспаков", 
+                                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
         await callback.answer()
         return
+    
     total_pages = (total + 9) // 10
     await state.update_data(pack_version=version, pack_page=1)
-    await callback.message.edit_text(f"🎨 Ресурспаки для версии {version} (стр 1/{total_pages}):", reply_markup=get_items_keyboard(items, "packs", 1, total_pages))
+    
+    has_vip = any(item[9] == 1 for item in items) if len(items[0]) > 9 else False
+    
+    await callback.message.edit_text(
+        f"🎨 Ресурспаки для версии {version} (стр 1/{total_pages}):", 
+        reply_markup=get_items_keyboard(items, "packs", 1, total_pages, show_vip=True)
+    )
     await callback.answer()
 
 # ========== КОНФИГИ ==========
 @dp.message(F.text == "⚙️ Конфиги")
 async def configs_menu(message: Message, state: FSMContext):
-    versions = get_all_config_versions()
+    user_id = message.from_user.id
+    versions = get_all_config_versions(user_id)
     if not versions:
         await message.answer("📭 Пока нет конфигов")
         return
-    await message.answer("⚙️ Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "configs"))
+    await message.answer("⚙️ Выбери версию Minecraft:", reply_markup=get_version_keyboard(versions, "configs", user_id))
 
 @dp.callback_query(lambda c: c.data.startswith("ver_configs_"))
 async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
     version = callback.data.replace("ver_configs_", "")
-    items, total = get_configs_by_version(version, 1)
+    items, total = get_configs_by_version(version, 1, user_id=user_id)
+    
     if not items:
-        await callback.message.edit_text(f"❌ Для версии {version} пока нет конфигов", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
+        await callback.message.edit_text(f"❌ Для версии {version} пока нет доступных конфигов", 
+                                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")]]))
         await callback.answer()
         return
+    
     total_pages = (total + 9) // 10
     await state.update_data(config_version=version, config_page=1)
-    await callback.message.edit_text(f"⚙️ Конфиги для версии {version} (стр 1/{total_pages}):", reply_markup=get_items_keyboard(items, "configs", 1, total_pages))
+    
+    has_vip = any(item[7] == 1 for item in items) if len(items[0]) > 7 else False
+    
+    await callback.message.edit_text(
+        f"⚙️ Конфиги для версии {version} (стр 1/{total_pages}):", 
+        reply_markup=get_items_keyboard(items, "configs", 1, total_pages, show_vip=True)
+    )
+    await callback.answer()
+
+# ========== VIP РАЗДЕЛ ==========
+@dp.message(F.text == "💎 VIP")
+async def vip_menu(message: Message):
+    user_id = message.from_user.id
+    user_status = get_user_status(user_id)
+    is_vip = user_status.get('is_vip', False)
+    balance = user_status.get('balance', 0)
+    
+    text = "💎 VIP раздел\n\n"
+    
+    if is_vip:
+        text += "✅ У тебя есть VIP статус!\n\n"
+        text += "Тебе доступен эксклюзивный контент:\n"
+        text += "• 💎 VIP клиенты\n"
+        text += "• 💎 VIP ресурспаки\n"
+        text += "• 💎 VIP конфиги\n\n"
+        text += "Просто выбери нужную категорию в главном меню!"
+    else:
+        text += "❌ У тебя нет VIP статуса\n\n"
+        text += f"Твой баланс: {balance}₽\n"
+        text += f"Стоимость VIP: 49₽ навсегда\n\n"
+        text += "VIP статус дает доступ к эксклюзивному контенту:\n"
+        text += "• 💎 VIP клиенты\n"
+        text += "• 💎 VIP ресурспаки\n"
+        text += "• 💎 VIP конфиги\n\n"
+    
+    buttons = []
+    if not is_vip:
+        buttons.append([InlineKeyboardButton(text="💎 Купить VIP за 49₽", callback_data="buy_vip")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(lambda c: c.data == "buy_vip")
+async def buy_vip(callback: CallbackQuery):
+    text = (
+        "💎 Покупка VIP статуса\n\n"
+        f"Свяжитесь с админом для оплаты:\n"
+        f"{ADMIN_BOT_LINK}\n\n"
+        "После оплаты вам будет выдан VIP статус навсегда!"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton(text="👤 Написать админу", url=ADMIN_BOT_LINK)],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_vip")]
+    ]
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "buy_vip_balance")
+async def buy_vip_balance(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    success, message_text = buy_vip_with_balance(user_id)
+    
+    if success:
+        await callback.message.edit_text(
+            f"✅ {message_text}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]])
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ {message_text}\n\nПополни баланс или свяжись с админом: {ADMIN_BOT_LINK}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]])
+        )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "vip_only")
+async def vip_only(callback: CallbackQuery):
+    await callback.answer("💎 Это VIP контент! Купи подписку в разделе 💎 VIP", show_alert=True)
+
+@dp.callback_query(lambda c: c.data == "back_to_vip")
+async def back_to_vip(callback: CallbackQuery):
+    await vip_menu(callback.message)
     await callback.answer()
 
 # ========== ПРОФИЛЬ ==========
@@ -1034,79 +1467,84 @@ async def show_profile(message: Message):
         
         if user_id == ADMIN_ID:
             status_text = "👑 СОЗДАТЕЛЬ"
+        elif status_data.get('is_vip', False):
+            status_text = "💎 VIP"
         else:
             status_text = "👤 ПОЛЬЗОВАТЕЛЬ"
+        
+        balance = status_data.get('balance', 0)
         
         bot_info = await bot.me()
         bot_username = bot_info.username
         ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
         
         text = (
-            f"👋 Привет, {first_name}! ❤️\n\n"
-            f"Мой любимый пользователь!\n\n"
-            f"🎉 Этот бот абсолютно бесплатный!\n"
-            f"Никаких лимитов!\n\n"
-            f"Твоя статистика:\n"
+            f"👋 Привет, {first_name}!\n\n"
+            f"Твой профиль:\n"
             f"• Статус: {status_text}\n"
             f"• ID: {user_id}\n"
+            f"• Баланс: {balance}₽\n"
             f"• Всего скачиваний: {status_data.get('downloads_total', 0)}\n"
             f"• Приглашено друзей: {status_data.get('invites', 0)}\n\n"
-            f"Твоя ссылка для приглашения:\n"
-            f"{ref_link}"
+            f"Твоя реферальная ссылка:\n{ref_link}"
         )
         
-        buttons = [
-            [InlineKeyboardButton(text="📊 Моя статистика", callback_data="profile_stats")],
-            [InlineKeyboardButton(text="📋 Мои скачивания", callback_data="profile_downloads")]
-        ]
-        
-        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await message.answer(text, reply_markup=get_balance_keyboard())
     except Exception as e:
         logger.error(f"Ошибка в профиле: {e}")
-        await message.answer("👋 Привет!\n\n🎉 Этот бот абсолютно бесплатный!")
+        await message.answer("👋 Привет!")
 
-@dp.callback_query(lambda c: c.data == "profile_stats")
-async def profile_stats(callback: CallbackQuery):
-    try:
-        user_id = callback.from_user.id
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        total_downloads = cur.execute('SELECT COUNT(*) FROM downloads_log WHERE user_id = ?', (user_id,)).fetchone()[0]
-        total_invites = cur.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (user_id,)).fetchone()[0]
-        recent = cur.execute('SELECT item_type, downloaded_at FROM downloads_log WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 5', (user_id,)).fetchall()
-        conn.close()
-        
-        text = f"Твоя статистика\n\n📥 Всего скачиваний: {total_downloads}\n👥 Приглашено друзей: {total_invites}\n\n"
-        if recent:
-            text += "Последние скачивания:\n"
-            for item_type, date in recent:
-                text += f"• {item_type} - {date[:10] if date else 'недавно'}\n"
-        
-        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]]))
-    except Exception as e:
-        logger.error(f"Ошибка в статистике профиля: {e}")
-        await callback.message.edit_text("❌ Ошибка загрузки статистики")
+@dp.callback_query(lambda c: c.data == "balance_add")
+async def balance_add(callback: CallbackQuery):
+    text = (
+        "💰 Пополнение баланса\n\n"
+        f"Для пополнения баланса свяжитесь с админом:\n"
+        f"{ADMIN_BOT_LINK}\n\n"
+        "После оплаты админ начислит средства на ваш баланс."
+    )
+    
+    buttons = [
+        [InlineKeyboardButton(text="👤 Написать админу", url=ADMIN_BOT_LINK)],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]
+    ]
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "profile_downloads")
-async def profile_downloads(callback: CallbackQuery):
+@dp.callback_query(lambda c: c.data == "balance_history")
+async def balance_history(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    
     try:
-        user_id = callback.from_user.id
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        downloads = cur.execute('SELECT item_type, item_id, downloaded_at FROM downloads_log WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT 10', (user_id,)).fetchall()
+        history = cur.execute('''
+            SELECT amount, action, created_at FROM balance_history 
+            WHERE user_id = ? ORDER BY created_at DESC LIMIT 10
+        ''', (user_id,)).fetchall()
         conn.close()
         
-        if not downloads:
-            text = "📭 У тебя пока нет скачиваний"
+        if not history:
+            text = "📭 История операций пуста"
         else:
-            text = "Твои скачивания:\n\n"
-            for i, (item_type, item_id, date) in enumerate(downloads, 1):
-                text += f"{i}. {item_type} (ID: {item_id}) - {date[:10] if date else 'недавно'}\n"
+            text = "📊 Последние операции:\n\n"
+            for amount, action, date in history:
+                action_text = {
+                    'add': '➕ Пополнение',
+                    'remove': '➖ Списание',
+                    'vip_grant': '💎 VIP выдан',
+                    'vip_remove': '❌ VIP снят',
+                    'vip_purchase': '💎 Покупка VIP'
+                }.get(action, action)
+                
+                if amount:
+                    text += f"• {action_text}: {amount}₽ - {date[:10]}\n"
+                else:
+                    text += f"• {action_text} - {date[:10]}\n"
         
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]]))
     except Exception as e:
-        logger.error(f"Ошибка в истории скачиваний: {e}")
+        logger.error(f"Ошибка истории баланса: {e}")
         await callback.message.edit_text("❌ Ошибка загрузки истории")
     await callback.answer()
 
@@ -1121,10 +1559,11 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
     _, category, page = callback.data.split("_")
     page = int(page)
     data = await state.get_data()
+    user_id = callback.from_user.id
     
     if category == "clients":
         version = data.get("client_version", "1.20")
-        items, total = get_clients_by_version(version, page)
+        items, total = get_clients_by_version(version, page, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"🎮 Нет клиентов для версии {version}")
             await callback.answer()
@@ -1132,7 +1571,7 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
         title = f"🎮 Клиенты для версии {version}"
     elif category == "packs":
         version = data.get("pack_version", "1.20")
-        items, total = get_packs_by_version(version, page)
+        items, total = get_packs_by_version(version, page, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"🎨 Нет ресурспаков для версии {version}")
             await callback.answer()
@@ -1140,7 +1579,7 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
         title = f"🎨 Ресурспаки для версии {version}"
     else:
         version = data.get("config_version", "1.20")
-        items, total = get_configs_by_version(version, page)
+        items, total = get_configs_by_version(version, page, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"⚙️ Нет конфигов для версии {version}")
             await callback.answer()
@@ -1149,7 +1588,7 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
     
     total_pages = max(1, (total + 9) // 10)
     await state.update_data({f"{category}_page": page})
-    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
+    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True))
     await callback.answer()
 
 # ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
@@ -1157,11 +1596,19 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
 async def detail_view(callback: CallbackQuery, state: FSMContext):
     _, category, item_id = callback.data.split("_")
     item_id = int(item_id)
+    user_id = callback.from_user.id
     
     item = get_item(category, item_id)
     if not item:
         await callback.answer("❌ Не найден", show_alert=True)
         return
+    
+    is_admin = (user_id == ADMIN_ID)
+    user_status = get_user_status(user_id)
+    is_vip = user_status.get('is_vip', False)
+    
+    vip_index = 6 if category == "clients" else (7 if category == "packs" else 6)
+    item_is_vip = item[vip_index] == 1 if len(item) > vip_index else False
     
     increment_view(category, item_id)
     
@@ -1172,9 +1619,10 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     
     is_fav = False
     if category == "clients":
-        downloads = int(item[6]) if len(item) > 6 and item[6] else 0
-        views = int(item[7]) if len(item) > 7 and item[7] else 0
-        text = f"🎮 {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+        downloads = int(item[7]) if len(item) > 7 and item[7] else 0
+        views = int(item[8]) if len(item) > 8 and item[8] else 0
+        vip_text = "💎 VIP\n\n" if item_is_vip else ""
+        text = f"🎮 {item[1]}\n\n{vip_text}{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
     
     elif category == "packs":
         conn = sqlite3.connect(str(DB_PATH))
@@ -1182,34 +1630,36 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
         is_fav = cur.execute('SELECT 1 FROM favorites WHERE user_id = ? AND pack_id = ?', (callback.from_user.id, item_id)).fetchone()
         conn.close()
         
-        downloads = int(item[7]) if len(item) > 7 and item[7] else 0
-        likes = int(item[8]) if len(item) > 8 and item[8] else 0
-        views = int(item[9]) if len(item) > 9 and item[9] else 0
-        text = f"🎨 {item[1]}\n\n{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
+        downloads = int(item[8]) if len(item) > 8 and item[8] else 0
+        likes = int(item[9]) if len(item) > 9 and item[9] else 0
+        views = int(item[10]) if len(item) > 10 and item[10] else 0
+        vip_text = "💎 VIP\n\n" if item_is_vip else ""
+        text = f"🎨 {item[1]}\n\n{vip_text}{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
     
     else:  # configs
-        downloads = int(item[6]) if len(item) > 6 and item[6] else 0
-        views = int(item[7]) if len(item) > 7 and item[7] else 0
-        text = f"⚙️ {item[1]}\n\n{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+        downloads = int(item[7]) if len(item) > 7 and item[7] else 0
+        views = int(item[8]) if len(item) > 8 and item[8] else 0
+        vip_text = "💎 VIP\n\n" if item_is_vip else ""
+        text = f"⚙️ {item[1]}\n\n{vip_text}{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
     
     if media_list and media_list[0]['type'] == 'photo':
         try:
             await callback.message.answer_photo(
                 photo=media_list[0]['id'], 
                 caption=text, 
-                reply_markup=get_detail_keyboard(category, item_id, is_fav)
+                reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin)
             )
             await callback.message.delete()
         except Exception as e:
             logger.error(f"Ошибка отправки фото: {e}")
             await callback.message.edit_text(
                 text + "\n\n❌ Фото недоступно", 
-                reply_markup=get_detail_keyboard(category, item_id, is_fav)
+                reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin)
             )
     else:
         await callback.message.edit_text(
             text, 
-            reply_markup=get_detail_keyboard(category, item_id, is_fav)
+            reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin)
         )
     
     await callback.answer()
@@ -1219,10 +1669,11 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     category = callback.data.replace("back_", "")
     data = await state.get_data()
+    user_id = callback.from_user.id
     
     if category == "clients":
         version = data.get("client_version", "1.20")
-        items, total = get_clients_by_version(version, 1)
+        items, total = get_clients_by_version(version, 1, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"🎮 Нет клиентов для версии {version}")
             await callback.answer()
@@ -1231,7 +1682,7 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         page = 1
     elif category == "packs":
         version = data.get("pack_version", "1.20")
-        items, total = get_packs_by_version(version, 1)
+        items, total = get_packs_by_version(version, 1, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"🎨 Нет ресурспаков для версии {version}")
             await callback.answer()
@@ -1240,7 +1691,7 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         page = 1
     else:
         version = data.get("config_version", "1.20")
-        items, total = get_configs_by_version(version, 1)
+        items, total = get_configs_by_version(version, 1, user_id=user_id)
         if total == 0:
             await callback.message.edit_text(f"⚙️ Нет конфигов для версии {version}")
             await callback.answer()
@@ -1249,10 +1700,10 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         page = 1
     
     total_pages = max(1, (total + 9) // 10)
-    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages))
+    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True))
     await callback.answer()
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ СКАЧИВАНИЯ ==========
+# ========== СКАЧИВАНИЕ ==========
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_item(callback: CallbackQuery):
     _, category, item_id = callback.data.split("_")
@@ -1264,33 +1715,42 @@ async def download_item(callback: CallbackQuery):
         await callback.answer("❌ Не найден", show_alert=True)
         return
     
-    increment_download(category, item_id)
-    increment_download_count(user_id)
+    is_admin = (user_id == ADMIN_ID)
+    user_status = get_user_status(user_id)
+    is_vip = user_status.get('is_vip', False)
+    
+    vip_index = 6 if category == "clients" else (7 if category == "packs" else 6)
+    item_is_vip = item[vip_index] == 1 if len(item) > vip_index else False
+    
+    if item_is_vip and not is_vip and not is_admin:
+        await callback.answer("💎 Это VIP контент! Купи подписку в разделе 💎 VIP", show_alert=True)
+        return
+    
+    increment_download(category, item_id, item_is_vip)
+    increment_download_count(user_id, item_is_vip)
     
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        cur.execute('INSERT INTO downloads_log (user_id, item_type, item_id) VALUES (?, ?, ?)', (user_id, category, item_id))
+        cur.execute('INSERT INTO downloads_log (user_id, item_type, item_id, vip_item) VALUES (?, ?, ?, ?)', 
+                   (user_id, category, item_id, 1 if item_is_vip else 0))
         conn.commit()
         conn.close()
     except Exception as e:
         logger.error(f"Ошибка логирования скачивания: {e}")
     
-    # Правильные индексы для каждой таблицы
     if category == "clients":
-        # clients: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), downloads(6), views(7)
         url = item[4]
         name = item[1]
     elif category == "packs":
-        # resourcepacks: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), author(6), downloads(7), likes(8), views(9)
         url = item[4]
         name = item[1]
-    else:  # configs
-        # configs: id(0), name(1), full_desc(2), media(3), download_url(4), version(5), downloads(6), views(7)
+    else:
         url = item[4]
         name = item[1]
     
-    await callback.message.answer(f"📥 Скачать {name}\n\n{url}")
+    vip_prefix = "💎 " if item_is_vip else ""
+    await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{url}")
     await callback.answer("✅ Ссылка отправлена!")
 
 # ========== ИЗБРАННОЕ ==========
@@ -1303,7 +1763,9 @@ async def show_favorites(message: Message):
     text = "❤️ Твоё избранное:\n\n"
     for fav in favs[:10]:
         downloads = int(fav[4]) if fav[4] else 0
-        text += f"• {fav[1]} - {format_number(downloads)} 📥\n"
+        is_vip = fav[6] if len(fav) > 6 else 0
+        vip_icon = "💎 " if is_vip else ""
+        text += f"• {vip_icon}{fav[1]} - {format_number(downloads)} 📥\n"
     await message.answer(text)
 
 @dp.callback_query(lambda c: c.data.startswith("fav_"))
@@ -1317,35 +1779,38 @@ async def favorite_handler(callback: CallbackQuery):
     await callback.answer("✅ Готово!")
     await detail_view(callback, None)
 
-# ========== ИНФО (БЕЗ УПОМИНАНИЯ ПАПКИ И БЭКАПОВ) ==========
+# ========== ИНФО ==========
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: Message):
     try:
         users_count = get_users_count()
+        vip_count = get_vip_users_count()
         
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         clients_count = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
+        vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
         packs_count = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
+        vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
         configs_count = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
+        vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
         conn.close()
         
         text = (
-            f"Информация о боте\n\n"
+            f"ℹ️ Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 16.0\n\n"
-            f"Статистика:\n"
-            f"• Пользователей: {users_count}\n"
-            f"• Клиентов: {clients_count}\n"
-            f"• Ресурспаков: {packs_count}\n"
-            f"• Конфигов: {configs_count}\n\n"
-            f"Бот полностью бесплатный!"
+            f"Версия: 18.0\n\n"
+            f"📊 Статистика:\n"
+            f"• Пользователей: {users_count} (💎 VIP: {vip_count})\n"
+            f"• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n"
+            f"• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n"
+            f"• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
         )
         
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 16.0")
+        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 18.0")
 
 # ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
@@ -1358,7 +1823,7 @@ async def help_command(message: Message):
 @dp.callback_query(lambda c: c.data == "help_rules")
 async def help_rules(callback: CallbackQuery):
     await callback.message.edit_text(
-        "📋 Правила использования\n\n1. Все файлы предоставляются 'как есть'\n2. Автор не несёт ответственности за использование файлов\n3. Уважайте других пользователей",
+        "📋 Правила использования\n\n1. Все файлы предоставляются 'как есть'\n2. Автор не несёт ответственности за использование файлов\n3. Уважайте других пользователей\n4. VIP контент доступен только после покупки",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
     )
     await callback.answer()
@@ -1366,7 +1831,19 @@ async def help_rules(callback: CallbackQuery):
 @dp.callback_query(lambda c: c.data == "help_faq")
 async def help_faq(callback: CallbackQuery):
     await callback.message.edit_text(
-        "❓ Часто задаваемые вопросы\n\nQ: Как скачать файл?\nA: Нажми на элемент, затем кнопку 'Скачать'\n\nQ: Есть ли лимиты?\nA: Нет! Бот полностью бесплатный, качай сколько хочешь!\n\nQ: Как сделать бэкап?\nA: В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'",
+        "❓ Часто задаваемые вопросы\n\n"
+        "Q: Как скачать файл?\n"
+        "A: Нажми на элемент, затем кнопку 'Скачать'\n\n"
+        "Q: Что такое VIP контент?\n"
+        "A: Это эксклюзивные файлы, отмеченные значком 💎\n\n"
+        "Q: Как получить VIP?\n"
+        "A: Пополни баланс и купи VIP в разделе 💎 VIP\n\n"
+        "Q: Как пополнить баланс?\n"
+        "A: Зайди в профиль и нажми 'Пополнить баланс'\n\n"
+        "Q: Сколько стоит VIP?\n"
+        "A: 49₽ навсегда\n\n"
+        "Q: Как сделать бэкап?\n"
+        "A: В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
     )
     await callback.answer()
@@ -1393,6 +1870,305 @@ async def admin_back(callback: CallbackQuery):
     await callback.message.delete()
     await callback.answer()
 
+# ========== АДМИН: УПРАВЛЕНИЕ БАЛАНСОМ ==========
+@dp.callback_query(lambda c: c.data == "admin_balance")
+async def admin_balance(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await callback.message.edit_text("💰 Управление балансом\n\nВыбери действие:", reply_markup=get_admin_balance_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "admin_balance_add")
+async def admin_balance_add_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.balance_user_id)
+    await callback.message.edit_text(
+        "➕ Начисление баланса\n\n"
+        "Введи ID пользователя:\n\n"
+        "❌ Отмена: /cancel"
+    )
+    await callback.answer()
+
+@dp.message(AdminStates.balance_user_id)
+async def admin_balance_user_id(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+    except:
+        await message.answer("❌ Неверный ID. Введи число или /cancel")
+        return
+    
+    await state.update_data(balance_user_id=user_id)
+    await state.set_state(AdminStates.balance_amount)
+    await message.answer(
+        "Введи сумму для начисления (в рублях):\n\n"
+        "❌ Отмена: /cancel"
+    )
+
+@dp.message(AdminStates.balance_amount)
+async def admin_balance_amount(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except:
+        await message.answer("❌ Введи положительное число или /cancel")
+        return
+    
+    data = await state.get_data()
+    user_id = data.get('balance_user_id')
+    
+    success = add_balance(user_id, amount, ADMIN_ID)
+    
+    await state.clear()
+    
+    if success:
+        await message.answer(f"✅ Баланс пользователя {user_id} пополнен на {amount}₽!")
+    else:
+        await message.answer("❌ Ошибка при начислении баланса")
+
+@dp.callback_query(lambda c: c.data == "admin_balance_remove")
+async def admin_balance_remove_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.balance_user_id)
+    await callback.message.edit_text(
+        "➖ Списание баланса\n\n"
+        "Введи ID пользователя:\n\n"
+        "❌ Отмена: /cancel"
+    )
+    await callback.answer()
+
+@dp.message(AdminStates.balance_user_id)
+async def admin_balance_remove_user_id(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+    except:
+        await message.answer("❌ Неверный ID. Введи число или /cancel")
+        return
+    
+    await state.update_data(balance_user_id=user_id)
+    await state.set_state(AdminStates.balance_amount)
+    await message.answer(
+        "Введи сумму для списания (в рублях):\n\n"
+        "❌ Отмена: /cancel"
+    )
+
+@dp.message(AdminStates.balance_amount)
+async def admin_balance_remove_amount(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except:
+        await message.answer("❌ Введи положительное число или /cancel")
+        return
+    
+    data = await state.get_data()
+    user_id = data.get('balance_user_id')
+    
+    success = remove_balance(user_id, amount, ADMIN_ID)
+    
+    await state.clear()
+    
+    if success:
+        await message.answer(f"✅ С баланса пользователя {user_id} списано {amount}₽!")
+    else:
+        await message.answer("❌ Ошибка при списании (возможно недостаточно средств)")
+
+@dp.callback_query(lambda c: c.data == "admin_balance_list")
+async def admin_balance_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    users = get_all_users_with_details()
+    
+    if not users:
+        await callback.message.edit_text(
+            "📭 Нет пользователей",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_balance")]])
+        )
+        await callback.answer()
+        return
+    
+    text = "💰 Список пользователей:\n\n"
+    for user_id, username, first_name, balance, is_vip in users[:20]:
+        name = first_name or username or str(user_id)
+        vip_mark = "💎" if is_vip else "👤"
+        text += f"• {vip_mark} {name} (ID: {user_id}) - {balance}₽\n"
+    
+    if len(users) > 20:
+        text += f"\n... и еще {len(users) - 20} пользователей"
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_balance")]]))
+    await callback.answer()
+
+# ========== АДМИН: VIP УПРАВЛЕНИЕ ==========
+@dp.callback_query(lambda c: c.data == "admin_vip")
+async def admin_vip(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    buttons = [
+        [InlineKeyboardButton(text="👑 Список VIP пользователей", callback_data="vip_list")],
+        [InlineKeyboardButton(text="➕ Выдать VIP", callback_data="vip_add")],
+        [InlineKeyboardButton(text="➖ Снять VIP", callback_data="vip_remove")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ]
+    
+    await callback.message.edit_text("👑 VIP управление\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "vip_list")
+async def vip_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    users = get_all_users_with_details()
+    vip_users = [u for u in users if u[4] == 1]
+    
+    if not vip_users:
+        await callback.message.edit_text(
+            "📭 Нет VIP пользователей",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_vip")]])
+        )
+        await callback.answer()
+        return
+    
+    text = "👑 VIP пользователи:\n\n"
+    for user_id, username, first_name, balance, is_vip in vip_users:
+        name = first_name or username or str(user_id)
+        text += f"• {name} (ID: {user_id}) - баланс: {balance}₽\n"
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_vip")]]))
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "vip_add")
+async def vip_add_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.balance_user_id)
+    await callback.message.edit_text(
+        "➕ Выдача VIP статуса\n\n"
+        "Введи ID пользователя:\n\n"
+        "❌ Отмена: /cancel"
+    )
+    await callback.answer()
+
+@dp.message(AdminStates.balance_user_id)
+async def vip_add_user_id(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+    except:
+        await message.answer("❌ Неверный ID. Введи число или /cancel")
+        return
+    
+    success = set_user_vip(user_id, ADMIN_ID)
+    
+    await state.clear()
+    
+    if success:
+        await message.answer(f"✅ VIP статус выдан пользователю {user_id}!")
+    else:
+        await message.answer("❌ Ошибка при выдаче VIP статуса")
+
+@dp.callback_query(lambda c: c.data == "vip_remove")
+async def vip_remove_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.balance_user_id)
+    await callback.message.edit_text(
+        "➖ Снятие VIP статуса\n\n"
+        "Введи ID пользователя:\n\n"
+        "❌ Отмена: /cancel"
+    )
+    await callback.answer()
+
+@dp.message(AdminStates.balance_user_id)
+async def vip_remove_user_id(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    if message.text and message.text.lower() == '/cancel':
+        await state.clear()
+        await message.answer("❌ Операция отменена")
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+    except:
+        await message.answer("❌ Неверный ID. Введи число или /cancel")
+        return
+    
+    success = remove_user_vip(user_id, ADMIN_ID)
+    
+    await state.clear()
+    
+    if success:
+        await message.answer(f"✅ VIP статус снят с пользователя {user_id}!")
+    else:
+        await message.answer("❌ Ошибка при снятии VIP статуса")
+
+# ========== АДМИН: КЛИЕНТЫ ==========
 @dp.callback_query(lambda c: c.data == "admin_clients")
 async def admin_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -1402,12 +2178,14 @@ async def admin_clients(callback: CallbackQuery):
         [InlineKeyboardButton(text="➕ Добавить клиента", callback_data="add_client")],
         [InlineKeyboardButton(text="✏️ Редактировать клиента", callback_data="edit_client_list")],
         [InlineKeyboardButton(text="🗑 Удалить клиента", callback_data="delete_client_list")],
+        [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_clients")],
         [InlineKeyboardButton(text="📋 Список клиентов", callback_data="list_clients")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
     ]
     await callback.message.edit_text("🎮 Управление клиентами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== АДМИН: РЕСУРСПАКИ ==========
 @dp.callback_query(lambda c: c.data == "admin_packs")
 async def admin_packs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -1417,12 +2195,14 @@ async def admin_packs(callback: CallbackQuery):
         [InlineKeyboardButton(text="➕ Добавить ресурспак", callback_data="add_pack")],
         [InlineKeyboardButton(text="✏️ Редактировать ресурспак", callback_data="edit_pack_list")],
         [InlineKeyboardButton(text="🗑 Удалить ресурспак", callback_data="delete_pack_list")],
+        [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_packs")],
         [InlineKeyboardButton(text="📋 Список ресурспаков", callback_data="list_packs")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
     ]
     await callback.message.edit_text("🎨 Управление ресурспаками\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== АДМИН: КОНФИГИ ==========
 @dp.callback_query(lambda c: c.data == "admin_configs")
 async def admin_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -1432,11 +2212,88 @@ async def admin_configs(callback: CallbackQuery):
         [InlineKeyboardButton(text="➕ Добавить конфиг", callback_data="add_config")],
         [InlineKeyboardButton(text="✏️ Редактировать конфиг", callback_data="edit_config_list")],
         [InlineKeyboardButton(text="🗑 Удалить конфиг", callback_data="delete_config_list")],
+        [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_configs")],
         [InlineKeyboardButton(text="📋 Список конфигов", callback_data="list_configs")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
     ]
     await callback.message.edit_text("⚙️ Управление конфигами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
+
+# ========== АДМИН: ПЕРЕКЛЮЧЕНИЕ VIP ==========
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_"))
+async def toggle_vip_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    category = callback.data.replace("toggle_vip_", "")
+    
+    table_map = {
+        'clients': 'clients',
+        'packs': 'resourcepacks',
+        'configs': 'configs'
+    }
+    table = table_map.get(category)
+    
+    items, total = get_all_items_paginated(table, 1, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    if not items:
+        await callback.message.edit_text(
+            f"📭 Нет элементов в категории {category}", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        status = "💎 VIP" if is_vip else "🔘 Обычный"
+        buttons.append([InlineKeyboardButton(
+            text=f"{item_id}. {name[:30]} ({version}) - {status}",
+            callback_data=f"toggle_vip_{category}_{item_id}"
+        )])
+    
+    nav_row = []
+    if page > 1: nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"toggle_vip_page_{category}_all_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages: nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_page_{category}_all_{page+1}"))
+    if nav_row: buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
+    
+    await callback.message.edit_text(
+        f"💎 Переключение VIP статуса для {category}\n\nВыбери элемент:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_") and len(c.data.split("_")) >= 4)
+async def toggle_vip_item(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    item_id = int(parts[3])
+    
+    table_map = {
+        'clients': 'clients',
+        'packs': 'resourcepacks',
+        'configs': 'configs'
+    }
+    table = table_map.get(category)
+    
+    new_status = toggle_item_vip(table, item_id)
+    
+    if new_status:
+        await callback.answer("✅ Элемент теперь VIP!", show_alert=True)
+    else:
+        await callback.answer("✅ Элемент теперь обычный!", show_alert=True)
+    
+    await toggle_vip_list(callback)
 
 # ========== АДМИН: СПИСКИ С ПАГИНАЦИЕЙ ==========
 @dp.callback_query(lambda c: c.data.startswith("list_page_"))
@@ -1460,7 +2317,7 @@ async def list_pagination(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
     
-    items, total = get_all_items_paginated(table, page)
+    items, total = get_all_items_paginated(table, page, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     await callback.message.edit_text(
@@ -1476,7 +2333,7 @@ async def edit_client_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("clients", 1)
+    items, total = get_all_items_paginated("clients", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
@@ -1516,12 +2373,16 @@ async def edit_client_select(callback: CallbackQuery):
     except:
         media_count = 0
     
+    is_vip = item[6] == 1 if len(item) > 6 else 0
+    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
+    
     fields = [
         [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_client_field_name_{item_id}")],
         [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_client_field_full_desc_{item_id}")],
         [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_client_field_version_{item_id}")],
         [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_client_field_download_url_{item_id}")],
         [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_client_media_{item_id}")],
+        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_clients_{item_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_client_list")]
     ]
     
@@ -1598,7 +2459,7 @@ async def edit_pack_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("resourcepacks", 1)
+    items, total = get_all_items_paginated("resourcepacks", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
@@ -1638,6 +2499,9 @@ async def edit_pack_select(callback: CallbackQuery):
     except:
         media_count = 0
     
+    is_vip = item[7] == 1 if len(item) > 7 else 0
+    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
+    
     fields = [
         [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_pack_field_name_{item_id}")],
         [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_pack_field_full_desc_{item_id}")],
@@ -1645,6 +2509,7 @@ async def edit_pack_select(callback: CallbackQuery):
         [InlineKeyboardButton(text="✍️ Автор", callback_data=f"edit_pack_field_author_{item_id}")],
         [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_pack_field_download_url_{item_id}")],
         [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_pack_media_{item_id}")],
+        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_packs_{item_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_pack_list")]
     ]
     
@@ -1722,7 +2587,7 @@ async def edit_config_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("configs", 1)
+    items, total = get_all_items_paginated("configs", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
@@ -1762,12 +2627,16 @@ async def edit_config_select(callback: CallbackQuery):
     except:
         media_count = 0
     
+    is_vip = item[6] == 1 if len(item) > 6 else 0
+    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
+    
     fields = [
         [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_config_field_name_{item_id}")],
         [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_config_field_full_desc_{item_id}")],
         [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_config_field_version_{item_id}")],
         [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_config_field_download_url_{item_id}")],
         [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_config_media_{item_id}")],
+        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_configs_{item_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_config_list")]
     ]
     
@@ -1952,7 +2821,7 @@ async def delete_client_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("clients", 1)
+    items, total = get_all_items_paginated("clients", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
@@ -2047,6 +2916,16 @@ async def client_version(message: Message, state: FSMContext):
 @dp.message(AdminStates.client_url)
 async def client_url(message: Message, state: FSMContext):
     await state.update_data(client_url=message.text)
+    await state.set_state(AdminStates.client_vip)
+    await message.answer(
+        "💎 Это VIP клиент?\n\n"
+        "Ответь 'да' или 'нет':"
+    )
+
+@dp.message(AdminStates.client_vip)
+async def client_vip(message: Message, state: FSMContext):
+    is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
+    await state.update_data(client_vip=is_vip)
     await state.set_state(AdminStates.client_media)
     await message.answer(
         "🖼️ Отправляй фото (можно несколько)\n\n"
@@ -2064,13 +2943,15 @@ async def client_media(message: Message, state: FSMContext):
             data['client_name'], 
             data['client_full_desc'], 
             data['client_url'], 
-            data['client_version'], 
+            data['client_version'],
+            data['client_vip'],
             media_list
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['client_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Клиент добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", 
+                f"✅ Клиент добавлен!\nID: {item_id}\n{vip_text}\nДобавлено фото: {len(media_list)}", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2085,13 +2966,15 @@ async def client_media(message: Message, state: FSMContext):
             data['client_name'], 
             data['client_full_desc'], 
             data['client_url'], 
-            data['client_version'], 
+            data['client_version'],
+            data['client_vip'],
             []
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['client_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Клиент добавлен!\nID: {item_id} (без фото)", 
+                f"✅ Клиент добавлен!\nID: {item_id}\n{vip_text}\nБез фото", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2148,6 +3031,16 @@ async def pack_author(message: Message, state: FSMContext):
 @dp.message(AdminStates.pack_url)
 async def pack_url(message: Message, state: FSMContext):
     await state.update_data(pack_url=message.text)
+    await state.set_state(AdminStates.pack_vip)
+    await message.answer(
+        "💎 Это VIP ресурспак?\n\n"
+        "Ответь 'да' или 'нет':"
+    )
+
+@dp.message(AdminStates.pack_vip)
+async def pack_vip(message: Message, state: FSMContext):
+    is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
+    await state.update_data(pack_vip=is_vip)
     await state.set_state(AdminStates.pack_media)
     await message.answer(
         "🖼️ Отправляй фото (можно несколько)\n\n"
@@ -2166,13 +3059,15 @@ async def pack_media(message: Message, state: FSMContext):
             data['pack_full_desc'], 
             data['pack_url'], 
             data['pack_version'], 
-            data['pack_author'], 
+            data['pack_author'],
+            data['pack_vip'],
             media_list
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['pack_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Ресурспак добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", 
+                f"✅ Ресурспак добавлен!\nID: {item_id}\n{vip_text}\nДобавлено фото: {len(media_list)}", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2188,13 +3083,15 @@ async def pack_media(message: Message, state: FSMContext):
             data['pack_full_desc'], 
             data['pack_url'], 
             data['pack_version'], 
-            data['pack_author'], 
+            data['pack_author'],
+            data['pack_vip'],
             []
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['pack_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Ресурспак добавлен!\nID: {item_id} (без фото)", 
+                f"✅ Ресурспак добавлен!\nID: {item_id}\n{vip_text}\nБез фото", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2245,6 +3142,16 @@ async def config_version(message: Message, state: FSMContext):
 @dp.message(AdminStates.config_url)
 async def config_url(message: Message, state: FSMContext):
     await state.update_data(config_url=message.text)
+    await state.set_state(AdminStates.config_vip)
+    await message.answer(
+        "💎 Это VIP конфиг?\n\n"
+        "Ответь 'да' или 'нет':"
+    )
+
+@dp.message(AdminStates.config_vip)
+async def config_vip(message: Message, state: FSMContext):
+    is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
+    await state.update_data(config_vip=is_vip)
     await state.set_state(AdminStates.config_media)
     await message.answer(
         "🖼️ Отправляй фото (можно несколько)\n\n"
@@ -2262,13 +3169,15 @@ async def config_media(message: Message, state: FSMContext):
             data['config_name'], 
             data['config_full_desc'], 
             data['config_url'], 
-            data['config_version'], 
+            data['config_version'],
+            data['config_vip'],
             media_list
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['config_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен!\nID: {item_id}\nДобавлено фото: {len(media_list)}", 
+                f"✅ Конфиг добавлен!\nID: {item_id}\n{vip_text}\nДобавлено фото: {len(media_list)}", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2283,13 +3192,15 @@ async def config_media(message: Message, state: FSMContext):
             data['config_name'], 
             data['config_full_desc'], 
             data['config_url'], 
-            data['config_version'], 
+            data['config_version'],
+            data['config_vip'],
             []
         )
         await state.clear()
         if item_id:
+            vip_text = "💎 VIP" if data['config_vip'] else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен!\nID: {item_id} (без фото)", 
+                f"✅ Конфиг добавлен!\nID: {item_id}\n{vip_text}\nБез фото", 
                 reply_markup=get_main_keyboard(is_admin=True)
             )
         else:
@@ -2316,16 +3227,18 @@ async def list_clients(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("clients", 1)
+    items, total = get_all_items_paginated("clients", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
         text = "📭 Список клиентов пуст"
     else:
         text = f"📋 Список клиентов (стр 1/{total_pages}):\n\n"
-        for item_id, name, full_desc, media_json, downloads, version in items:
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
             downloads = int(downloads) if downloads else 0
-            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+            vip_icon = "💎 " if is_vip else ""
+            text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2346,13 +3259,15 @@ async def list_clients_page(callback: CallbackQuery):
         return
     
     page = int(callback.data.replace("list_clients_page_", ""))
-    items, total = get_all_items_paginated("clients", page)
+    items, total = get_all_items_paginated("clients", page, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     text = f"📋 Список клиентов (стр {page}/{total_pages}):\n\n"
-    for item_id, name, full_desc, media_json, downloads, version in items:
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
         downloads = int(downloads) if downloads else 0
-        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+        vip_icon = "💎 " if is_vip else ""
+        text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2373,16 +3288,18 @@ async def list_packs(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("resourcepacks", 1)
+    items, total = get_all_items_paginated("resourcepacks", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
         text = "📭 Список ресурспаков пуст"
     else:
         text = f"📋 Список ресурспаков (стр 1/{total_pages}):\n\n"
-        for item_id, name, full_desc, media_json, downloads, version in items:
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
             downloads = int(downloads) if downloads else 0
-            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+            vip_icon = "💎 " if is_vip else ""
+            text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2403,13 +3320,15 @@ async def list_packs_page(callback: CallbackQuery):
         return
     
     page = int(callback.data.replace("list_packs_page_", ""))
-    items, total = get_all_items_paginated("resourcepacks", page)
+    items, total = get_all_items_paginated("resourcepacks", page, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     text = f"📋 Список ресурспаков (стр {page}/{total_pages}):\n\n"
-    for item_id, name, full_desc, media_json, downloads, version in items:
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
         downloads = int(downloads) if downloads else 0
-        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+        vip_icon = "💎 " if is_vip else ""
+        text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2430,16 +3349,18 @@ async def list_configs(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    items, total = get_all_items_paginated("configs", 1)
+    items, total = get_all_items_paginated("configs", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     if not items:
         text = "📭 Список конфигов пуст"
     else:
         text = f"📋 Список конфигов (стр 1/{total_pages}):\n\n"
-        for item_id, name, full_desc, media_json, downloads, version in items:
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
             downloads = int(downloads) if downloads else 0
-            text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+            vip_icon = "💎 " if is_vip else ""
+            text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if total_pages > 1:
@@ -2460,13 +3381,15 @@ async def list_configs_page(callback: CallbackQuery):
         return
     
     page = int(callback.data.replace("list_configs_page_", ""))
-    items, total = get_all_items_paginated("configs", page)
+    items, total = get_all_items_paginated("configs", page, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
     
     text = f"📋 Список конфигов (стр {page}/{total_pages}):\n\n"
-    for item_id, name, full_desc, media_json, downloads, version in items:
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
         downloads = int(downloads) if downloads else 0
-        text += f"{item_id}. {name} ({version})\n   📥 {format_number(downloads)}\n\n"
+        vip_icon = "💎 " if is_vip else ""
+        text += f"{item_id}. {vip_icon}{name} ({version})\n   📥 {format_number(downloads)}\n\n"
     
     nav_row = []
     if page > 1:
@@ -2888,16 +3811,24 @@ async def admin_stats(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     users_count = get_users_count()
+    vip_count = get_vip_users_count()
     
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     clients_count = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
+    vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
     packs_count = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
+    vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
     configs_count = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
+    vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
     conn.close()
     
     await callback.message.edit_text(
-        f"📊 Статистика\n\n👤 Пользователей: {users_count}\n🎮 Клиентов: {clients_count}\n🎨 Ресурспаков: {packs_count}\n⚙️ Конфигов: {configs_count}",
+        f"📊 Статистика\n\n"
+        f"👤 Пользователей: {users_count} (💎 VIP: {vip_count})\n"
+        f"🎮 Клиентов: {clients_count} (💎 VIP: {vip_clients})\n"
+        f"🎨 Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n"
+        f"⚙️ Конфигов: {configs_count} (💎 VIP: {vip_configs})",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
     )
     await callback.answer()
@@ -3186,8 +4117,11 @@ async def noop(callback: CallbackQuery):
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.delete()
-    is_admin = (callback.from_user.id == ADMIN_ID)
-    await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard(is_admin))
+    user_id = callback.from_user.id
+    user_status = get_user_status(user_id)
+    is_admin = (user_id == ADMIN_ID)
+    is_vip = user_status.get('is_vip', False)
+    await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard(is_admin, is_vip))
     await callback.answer()
 
 # ========== ЗАПУСК ==========
@@ -3199,18 +4133,15 @@ async def main():
     print(f"📁 Папка данных: {DATA_DIR}")
     print("="*50)
     print("📌 Новые функции:")
-    print("   • 👤 Профиль с приветствием")
-    print("   • 🎉 Бот полностью бесплатный")
-    print("   • 📊 Статистика скачиваний")
-    print("   • 🔧 Исправлена кнопка Инфо")
-    print("   • 🔧 Исправлена пагинация")
-    print("   • 🔧 Исправлены бэкапы (base64)")
+    print("   • 💎 VIP контент (виден всем, скачать только VIP)")
+видео зз    print("   • 💰 Система баланса")
+    print("   • 📤 Пополнение через админа")
+    print("   • 👑 VIP за 49₽ навсегда")
+    print("   • 🔄 Переключение VIP в админке")
     print("   • 🖼️ Редактирование фото")
     print("   • 📑 Пагинация в админке")
-    print("   • 📢 Исправлена рассылка")
-    print("   • 🔧 Исправлена ошибка со скачиванием")
-    print("   • 🔍 Проверка структуры бэкапов")
-    print("   • 🗑 Убрана информация о файлах из инфо")
+    print("   • 📢 Рассылка")
+    print("   • 📦 Бэкапы (base64)")
     print("="*50)
     
     try:
