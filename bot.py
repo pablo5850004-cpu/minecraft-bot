@@ -34,8 +34,8 @@ if not BOT_TOKEN:
 
 ADMIN_ID = 5809098591
 CREATOR_USERNAME = "@Strann1k_fiol"
-ADMIN_BOT_LINK = "https://t.me/Strann1k_fiol"  # Ссылка на Telegram админа Ссылка на бота для связи с админом
-VIP_PRICE = 49  # Стоимость VIP в рублях
+ADMIN_BOT_LINK = "https://t.me/Strann1k_fiol"
+VIP_PRICE = 49
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -168,7 +168,7 @@ def init_users_db():
             CREATE TABLE IF NOT EXISTS balance_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                amount INTEGER NOT NULL,
+                amount INTEGER,
                 action TEXT NOT NULL,
                 admin_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -297,7 +297,6 @@ def get_user_status(user_id: int) -> dict:
         }
 
 def add_balance(user_id: int, amount: int, admin_id: int = None):
-    """Добавить баланс пользователю"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -322,7 +321,6 @@ def add_balance(user_id: int, amount: int, admin_id: int = None):
         return False
 
 def remove_balance(user_id: int, amount: int, admin_id: int = None):
-    """Списать баланс пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -353,7 +351,6 @@ def remove_balance(user_id: int, amount: int, admin_id: int = None):
         return False
 
 def set_user_vip(user_id: int, admin_id: int = None):
-    """Установить VIP статус пользователю навсегда"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -379,7 +376,6 @@ def set_user_vip(user_id: int, admin_id: int = None):
         return False
 
 def remove_user_vip(user_id: int, admin_id: int = None):
-    """Снять VIP статус с пользователя"""
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
@@ -403,37 +399,6 @@ def remove_user_vip(user_id: int, admin_id: int = None):
     except Exception as e:
         logger.error(f"Ошибка снятия VIP статуса для {user_id}: {e}")
         return False
-
-def buy_vip_with_balance(user_id: int):
-    """Купить VIP за баланс"""
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        
-        cur.execute('SELECT balance, is_vip FROM users WHERE user_id = ?', (user_id,))
-        result = cur.fetchone()
-        if not result:
-            conn.close()
-            return False, "Пользователь не найден"
-        
-        balance, is_vip = result
-        if is_vip:
-            conn.close()
-            return False, "У вас уже есть VIP статус"
-        
-        if balance < VIP_PRICE:
-            conn.close()
-            return False, f"Недостаточно средств. Нужно {VIP_PRICE} руб."
-        
-        cur.execute('UPDATE users SET balance = balance - ?, is_vip = 1 WHERE user_id = ?', (VIP_PRICE, user_id))
-        cur.execute('INSERT INTO balance_history (user_id, amount, action) VALUES (?, ?, "vip_purchase")', (user_id, VIP_PRICE))
-        
-        conn.commit()
-        conn.close()
-        return True, f"VIP статус успешно активирован!"
-    except Exception as e:
-        logger.error(f"Ошибка покупки VIP для {user_id}: {e}")
-        return False, "Ошибка при покупке VIP"
 
 def increment_download_count(user_id: int, vip_item: bool = False):
     try:
@@ -604,7 +569,6 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         return [], 0
 
 def toggle_item_vip(table: str, item_id: int):
-    """Переключить VIP статус элемента"""
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
@@ -1037,7 +1001,6 @@ async def restore_from_zip(zip_path):
         return False
 
 def check_backup_structure(zip_path):
-    """Проверяет структуру бэкапа и возвращает отчет о несоответствиях"""
     issues = []
     try:
         with zipfile.ZipFile(zip_path, 'r') as zipf:
@@ -1054,7 +1017,6 @@ def check_backup_structure(zip_path):
 
 # ========== ФУНКЦИЯ ФОРМАТИРОВАНИЯ ЧИСЕЛ ==========
 def format_number(num):
-    """Безопасное форматирование чисел"""
     if num is None:
         return "0"
     try:
@@ -1282,7 +1244,6 @@ async def cmd_start(message: Message):
         reply_markup=get_main_keyboard(is_admin, is_vip)
     )
 
-# ========== КЛИЕНТЫ ==========
 @dp.message(F.text == "🎮 Клиенты")
 async def clients_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -1307,15 +1268,12 @@ async def clients_version_selected(callback: CallbackQuery, state: FSMContext):
     total_pages = (total + 9) // 10
     await state.update_data(client_version=version, client_page=1)
     
-    has_vip = any(item[7] == 1 for item in items) if len(items[0]) > 7 else False
-    
     await callback.message.edit_text(
         f"🎮 Клиенты для версии {version} (стр 1/{total_pages}):", 
         reply_markup=get_items_keyboard(items, "clients", 1, total_pages, show_vip=True)
     )
     await callback.answer()
 
-# ========== РЕСУРСПАКИ ==========
 @dp.message(F.text == "🎨 Ресурспаки")
 async def packs_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -1340,15 +1298,12 @@ async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
     total_pages = (total + 9) // 10
     await state.update_data(pack_version=version, pack_page=1)
     
-    has_vip = any(item[9] == 1 for item in items) if len(items[0]) > 9 else False
-    
     await callback.message.edit_text(
         f"🎨 Ресурспаки для версии {version} (стр 1/{total_pages}):", 
         reply_markup=get_items_keyboard(items, "packs", 1, total_pages, show_vip=True)
     )
     await callback.answer()
 
-# ========== КОНФИГИ ==========
 @dp.message(F.text == "⚙️ Конфиги")
 async def configs_menu(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -1373,15 +1328,12 @@ async def configs_version_selected(callback: CallbackQuery, state: FSMContext):
     total_pages = (total + 9) // 10
     await state.update_data(config_version=version, config_page=1)
     
-    has_vip = any(item[7] == 1 for item in items) if len(items[0]) > 7 else False
-    
     await callback.message.edit_text(
         f"⚙️ Конфиги для версии {version} (стр 1/{total_pages}):", 
         reply_markup=get_items_keyboard(items, "configs", 1, total_pages, show_vip=True)
     )
     await callback.answer()
 
-# ========== VIP РАЗДЕЛ ==========
 @dp.message(F.text == "💎 VIP")
 async def vip_menu(message: Message):
     user_id = message.from_user.id
@@ -1401,7 +1353,7 @@ async def vip_menu(message: Message):
     else:
         text += "❌ У тебя нет VIP статуса\n\n"
         text += f"Твой баланс: {balance}₽\n"
-        text += f"Стоимость VIP: 49₽ навсегда\n\n"
+        text += f"Стоимость VIP: {VIP_PRICE}₽ навсегда\n\n"
         text += "VIP статус дает доступ к эксклюзивному контенту:\n"
         text += "• 💎 VIP клиенты\n"
         text += "• 💎 VIP ресурспаки\n"
@@ -1409,7 +1361,7 @@ async def vip_menu(message: Message):
     
     buttons = []
     if not is_vip:
-        buttons.append([InlineKeyboardButton(text="💎 Купить VIP за 49₽", callback_data="buy_vip")])
+        buttons.append([InlineKeyboardButton(text="💎 Купить VIP", callback_data="buy_vip")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
     
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -1433,19 +1385,19 @@ async def buy_vip(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "buy_vip_balance")
 async def buy_vip_balance(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    success, message_text = buy_vip_with_balance(user_id)
+    text = (
+        "💎 Покупка VIP статуса\n\n"
+        f"Свяжитесь с админом для оплаты:\n"
+        f"{ADMIN_BOT_LINK}\n\n"
+        "После оплаты вам будет выдан VIP статус навсегда!"
+    )
     
-    if success:
-        await callback.message.edit_text(
-            f"✅ {message_text}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]])
-        )
-    else:
-        await callback.message.edit_text(
-            f"❌ {message_text}\n\nПополни баланс или свяжись с админом: {ADMIN_BOT_LINK}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]])
-        )
+    buttons = [
+        [InlineKeyboardButton(text="👤 Написать админу", url=ADMIN_BOT_LINK)],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]
+    ]
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "vip_only")
@@ -1457,7 +1409,6 @@ async def back_to_vip(callback: CallbackQuery):
     await vip_menu(callback.message)
     await callback.answer()
 
-# ========== ПРОФИЛЬ ==========
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: Message):
     try:
@@ -1534,7 +1485,6 @@ async def balance_history(callback: CallbackQuery):
                     'remove': '➖ Списание',
                     'vip_grant': '💎 VIP выдан',
                     'vip_remove': '❌ VIP снят',
-                    'vip_purchase': '💎 Покупка VIP'
                 }.get(action, action)
                 
                 if amount:
@@ -1553,7 +1503,6 @@ async def back_to_profile(callback: CallbackQuery):
     await show_profile(callback.message)
     await callback.answer()
 
-# ========== ПАГИНАЦИЯ ==========
 @dp.callback_query(lambda c: c.data.startswith("page_"))
 async def pagination(callback: CallbackQuery, state: FSMContext):
     _, category, page = callback.data.split("_")
@@ -1591,7 +1540,6 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True))
     await callback.answer()
 
-# ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
 @dp.callback_query(lambda c: c.data.startswith("detail_"))
 async def detail_view(callback: CallbackQuery, state: FSMContext):
     _, category, item_id = callback.data.split("_")
@@ -1636,7 +1584,7 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
         vip_text = "💎 VIP\n\n" if item_is_vip else ""
         text = f"🎨 {item[1]}\n\n{vip_text}{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
     
-    else:  # configs
+    else:
         downloads = int(item[7]) if len(item) > 7 and item[7] else 0
         views = int(item[8]) if len(item) > 8 and item[8] else 0
         vip_text = "💎 VIP\n\n" if item_is_vip else ""
@@ -1664,7 +1612,6 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
-# ========== НАВИГАЦИЯ НАЗАД ==========
 @dp.callback_query(lambda c: c.data.startswith("back_"))
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     category = callback.data.replace("back_", "")
@@ -1703,7 +1650,6 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True))
     await callback.answer()
 
-# ========== СКАЧИВАНИЕ ==========
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_item(callback: CallbackQuery):
     _, category, item_id = callback.data.split("_")
@@ -1753,7 +1699,6 @@ async def download_item(callback: CallbackQuery):
     await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{url}")
     await callback.answer("✅ Ссылка отправлена!")
 
-# ========== ИЗБРАННОЕ ==========
 @dp.message(F.text == "❤️ Избранное")
 async def show_favorites(message: Message):
     favs = get_favorites(message.from_user.id)
@@ -1779,7 +1724,6 @@ async def favorite_handler(callback: CallbackQuery):
     await callback.answer("✅ Готово!")
     await detail_view(callback, None)
 
-# ========== ИНФО ==========
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: Message):
     try:
@@ -1812,7 +1756,6 @@ async def info(message: Message):
         logger.error(f"Ошибка в info: {e}")
         await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 18.0")
 
-# ========== ПОМОЩЬ ==========
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
     await message.answer(
@@ -1856,7 +1799,6 @@ async def back_to_help(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== АДМИН ПАНЕЛЬ ==========
 @dp.message(F.text == "⚙️ Админ панель")
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -1870,7 +1812,6 @@ async def admin_back(callback: CallbackQuery):
     await callback.message.delete()
     await callback.answer()
 
-# ========== АДМИН: УПРАВЛЕНИЕ БАЛАНСОМ ==========
 @dp.callback_query(lambda c: c.data == "admin_balance")
 async def admin_balance(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2046,7 +1987,6 @@ async def admin_balance_list(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_balance")]]))
     await callback.answer()
 
-# ========== АДМИН: VIP УПРАВЛЕНИЕ ==========
 @dp.callback_query(lambda c: c.data == "admin_vip")
 async def admin_vip(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2168,7 +2108,6 @@ async def vip_remove_user_id(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Ошибка при снятии VIP статуса")
 
-# ========== АДМИН: КЛИЕНТЫ ==========
 @dp.callback_query(lambda c: c.data == "admin_clients")
 async def admin_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2185,7 +2124,6 @@ async def admin_clients(callback: CallbackQuery):
     await callback.message.edit_text("🎮 Управление клиентами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== АДМИН: РЕСУРСПАКИ ==========
 @dp.callback_query(lambda c: c.data == "admin_packs")
 async def admin_packs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2202,7 +2140,6 @@ async def admin_packs(callback: CallbackQuery):
     await callback.message.edit_text("🎨 Управление ресурспаками\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== АДМИН: КОНФИГИ ==========
 @dp.callback_query(lambda c: c.data == "admin_configs")
 async def admin_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2219,7 +2156,6 @@ async def admin_configs(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ Управление конфигами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== АДМИН: ПЕРЕКЛЮЧЕНИЕ VIP ==========
 @dp.callback_query(lambda c: c.data.startswith("toggle_vip_"))
 async def toggle_vip_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2295,7 +2231,6 @@ async def toggle_vip_item(callback: CallbackQuery):
     
     await toggle_vip_list(callback)
 
-# ========== АДМИН: СПИСКИ С ПАГИНАЦИЕЙ ==========
 @dp.callback_query(lambda c: c.data.startswith("list_page_"))
 async def list_pagination(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2326,7 +2261,6 @@ async def list_pagination(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== АДМИН: РЕДАКТИРОВАНИЕ КЛИЕНТА ==========
 @dp.callback_query(lambda c: c.data == "edit_client_list")
 async def edit_client_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2452,7 +2386,6 @@ async def edit_client_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== АДМИН: РЕДАКТИРОВАНИЕ РЕСУРСПАКА ==========
 @dp.callback_query(lambda c: c.data == "edit_pack_list")
 async def edit_pack_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2580,7 +2513,6 @@ async def edit_pack_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== АДМИН: РЕДАКТИРОВАНИЕ КОНФИГА ==========
 @dp.callback_query(lambda c: c.data == "edit_config_list")
 async def edit_config_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2706,7 +2638,6 @@ async def edit_config_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== АДМИН: ОБЩИЙ ОБРАБОТЧИК РЕДАКТИРОВАНИЯ ЗНАЧЕНИЙ ==========
 @dp.message(AdminStates.edit_value)
 async def edit_value(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -2729,7 +2660,6 @@ async def edit_value(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
 
-# ========== АДМИН: ОБРАБОТЧИК РЕДАКТИРОВАНИЯ МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("add_media_"))
 async def add_media_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2814,7 +2744,6 @@ async def handle_media_edit(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
 
-# ========== АДМИН: УДАЛЕНИЕ ==========
 @dp.callback_query(lambda c: c.data == "delete_client_list")
 async def delete_client_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2885,7 +2814,6 @@ async def delete_client_execute(callback: CallbackQuery):
     await callback.answer("✅ Клиент удалён!", show_alert=True)
     await delete_client_list(callback)
 
-# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
 @dp.callback_query(lambda c: c.data == "add_client")
 async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2994,7 +2922,6 @@ async def client_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
-# ========== АДМИН: ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
 @dp.callback_query(lambda c: c.data == "add_pack")
 async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3111,7 +3038,6 @@ async def pack_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
-# ========== АДМИН: ДОБАВЛЕНИЕ КОНФИГА ==========
 @dp.callback_query(lambda c: c.data == "add_config")
 async def add_config_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3220,7 +3146,6 @@ async def config_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
-# ========== АДМИН: СПИСКИ ==========
 @dp.callback_query(lambda c: c.data == "list_clients")
 async def list_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3404,15 +3329,12 @@ async def list_configs_page(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== ИСПРАВЛЕННЫЙ КОД ДЛЯ БЭКАПОВ (BASE64) ==========
 def encode_filename(filename):
-    """Кодирует имя файла в безопасный формат для callback_data"""
     filename_bytes = filename.encode('utf-8')
     encoded = base64.b64encode(filename_bytes).decode('utf-8')
     return encoded[:50]
 
 def decode_filename(encoded):
-    """Декодирует имя файла из base64"""
     try:
         decoded_bytes = base64.b64decode(encoded)
         return decoded_bytes.decode('utf-8')
@@ -3421,7 +3343,6 @@ def decode_filename(encoded):
 
 @dp.callback_query(lambda c: c.data == "admin_zip_backups")
 async def admin_zip_backups(callback: CallbackQuery):
-    """Меню ZIP бэкапов"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3514,7 +3435,6 @@ async def create_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_") and not c.data.startswith("restore_confirm_"))
 async def restore_backup(callback: CallbackQuery):
-    """Восстановление из бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3574,7 +3494,6 @@ async def restore_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_confirm_"))
 async def restore_confirm(callback: CallbackQuery):
-    """Подтверждение восстановления"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3620,7 +3539,6 @@ async def restore_confirm(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "upload_backup")
 async def upload_backup(callback: CallbackQuery, state: FSMContext):
-    """Загрузка бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3634,7 +3552,6 @@ async def upload_backup(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_backup)
 async def handle_upload(message: Message, state: FSMContext):
-    """Обработка загруженного файла"""
     if message.from_user.id != ADMIN_ID:
         await state.clear()
         return
@@ -3804,7 +3721,6 @@ async def cleanup_old(callback: CallbackQuery):
     await callback.message.edit_text(f"✅ Удалено: {deleted}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]]))
     await callback.answer()
 
-# ========== АДМИН: СТАТИСТИКА ==========
 @dp.callback_query(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3833,7 +3749,6 @@ async def admin_stats(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== АДМИН: РАССЫЛКА ==========
 @dp.callback_query(lambda c: c.data == "admin_broadcast")
 async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3989,7 +3904,6 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     try:
@@ -4108,7 +4022,6 @@ async def media_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer()
 
-# ========== ЗАГЛУШКИ ==========
 @dp.callback_query(lambda c: c.data == "noop")
 async def noop(callback: CallbackQuery):
     await callback.answer()
@@ -4124,7 +4037,6 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard(is_admin, is_vip))
     await callback.answer()
 
-# ========== ЗАПУСК ==========
 async def main():
     print("="*50)
     print("✅ Бот запущен!")
@@ -4134,7 +4046,7 @@ async def main():
     print("="*50)
     print("📌 Новые функции:")
     print("   • 💎 VIP контент (виден всем, скачать только VIP)")
-видео зз    print("   • 💰 Система баланса")
+    print("   • 💰 Система баланса")
     print("   • 📤 Пополнение через админа")
     print("   • 👑 VIP за 49₽ навсегда")
     print("   • 🔄 Переключение VIP в админке")
