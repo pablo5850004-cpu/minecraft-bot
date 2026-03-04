@@ -399,7 +399,7 @@ def add_balance(user_id: int, amount: int, admin_id: int = None):
         if 'balance' not in columns:
             cur.execute("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
         cur.execute('UPDATE users SET balance = COALESCE(balance, 0) + ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', (amount, user_id))
-        cur.execute('INSERT INTO balance_history (user_id, amount, action, admin_id) VALUES (?, ?, 'add', ?)', (user_id, amount, admin_id))
+        cur.execute("INSERT INTO balance_history (user_id, amount, action, admin_id) VALUES (?, ?, 'add', ?)", (user_id, amount, admin_id))
         conn.commit()
         conn.close()
         return True
@@ -416,7 +416,7 @@ def set_user_vip(user_id: int, admin_id: int = None):
         if 'is_vip' not in columns:
             cur.execute("ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0")
         cur.execute('UPDATE users SET is_vip = 1, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', (user_id,))
-        cur.execute('INSERT INTO balance_history (user_id, action, admin_id) VALUES (?, 'vip_grant', ?)', (user_id, admin_id))
+        cur.execute("INSERT INTO balance_history (user_id, action, admin_id) VALUES (?, 'vip_grant', ?)", (user_id, admin_id))
         conn.commit()
         conn.close()
         logger.info(f"VIP статус установлен для пользователя {user_id}")
@@ -434,7 +434,7 @@ def remove_user_vip(user_id: int, admin_id: int = None):
         if 'is_vip' not in columns:
             cur.execute("ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0")
         cur.execute('UPDATE users SET is_vip = 0, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', (user_id,))
-        cur.execute('INSERT INTO balance_history (user_id, action, admin_id) VALUES (?, 'vip_remove', ?)', (user_id, admin_id))
+        cur.execute("INSERT INTO balance_history (user_id, action, admin_id) VALUES (?, 'vip_remove', ?)", (user_id, admin_id))
         conn.commit()
         conn.close()
         logger.info(f"VIP статус снят с пользователя {user_id}")
@@ -455,7 +455,7 @@ def increment_download_count(user_id: int, vip_item: bool = False):
         conn.close()
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        cur.execute('INSERT INTO downloads_log (user_id, item_type, item_id, vip_item) VALUES (?, 'download', 0, ?)', (user_id, 1 if vip_item else 0))
+        cur.execute("INSERT INTO downloads_log (user_id, item_type, item_id, vip_item) VALUES (?, 'download', 0, ?)", (user_id, 1 if vip_item else 0))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -572,6 +572,7 @@ def delete_item(table: str, item_id: int):
         cur.execute(f'DELETE FROM {table} WHERE id = ?', (item_id,))
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         logger.error(f"Ошибка удаления элемента {table} {item_id}: {e}")
         return False
@@ -1115,7 +1116,7 @@ def get_help_keyboard():
 
 def get_profile_keyboard():
     buttons = [
-        [InlineKeyboardButton(text="💎 Купить VIP", callback_data="buy_vip_profile")],
+        [InlineKeyboardButton(text="💎 Получить VIP", url=ADMIN_BOT_LINK)],
         [InlineKeyboardButton(text="📊 История", callback_data="profile_history")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -1242,11 +1243,6 @@ async def show_profile(message: Message):
     except Exception as e:
         logger.error(f"Ошибка в профиле: {e}")
         await message.answer("👋 Привет!")
-
-@dp.callback_query(lambda c: c.data == "buy_vip_profile")
-async def buy_vip_profile(callback: CallbackQuery):
-    await callback.message.edit_text(f"💎 Для получения VIP статуса свяжись с админом:\n{ADMIN_BOT_LINK}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]]))
-    await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "profile_history")
 async def profile_history(callback: CallbackQuery):
