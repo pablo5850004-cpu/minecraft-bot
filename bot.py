@@ -656,46 +656,46 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
         
-        cur.execute("SELECT DISTINCT version FROM clients WHERE version IS NOT NULL")
-        all_versions = [v[0] for v in cur.fetchall()]
-        logger.info(f"📋 Все версии в БД: {all_versions}")
-        
+        # Проверяем структуру таблицы clients
         cur.execute("PRAGMA table_info(clients)")
         columns = [col[1] for col in cur.fetchall()]
-        has_vip = 'is_vip' in columns
+        logger.info(f"📋 Структура таблицы clients: {columns}")
         
-        if has_vip:
-            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', 
-                       (search_version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
-        else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', 
-                       (search_version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
+        # Проверяем все версии в базе для отладки
+        cur.execute("SELECT id, name, version FROM clients WHERE version IS NOT NULL")
+        all_clients = cur.fetchall()
+        logger.info(f"📋 Все клиенты в БД: {all_clients}")
         
+        # Простой запрос без лишних колонок
+        cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE version = ? ORDER BY id DESC LIMIT ? OFFSET ?', 
+                   (search_version, per_page, offset))
         items = cur.fetchall()
+        
+        total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
         
         logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
         
+        # Если не нашли, пробуем найти без учета регистра
         if len(items) == 0:
-            cur.execute("SELECT id, name, full_desc, media, downloads, views, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
+            cur.execute("SELECT id, name, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
             alternative = cur.fetchall()
             if alternative:
-                logger.info(f"✅ Найдено по LOWER совпадению: {len(alternative)}")
+                logger.info(f"✅ Найдено по LOWER совпадению: {alternative}")
+                # Получаем полные данные для этих ID
+                ids = [str(a[0]) for a in alternative]
+                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE id IN ({",".join(ids)})')
+                items = cur.fetchall()
+                total = len(items)
         
         converted_items = []
         for item in items:
             item_list = list(item)
+            # Преобразуем downloads в число
             if len(item_list) > 4 and item_list[4] is not None:
                 try:
                     item_list[4] = int(item_list[4])
                 except:
                     item_list[4] = 0
-            if len(item_list) > 5 and item_list[5] is not None:
-                try:
-                    item_list[5] = int(item_list[5])
-                except:
-                    item_list[5] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -1080,8 +1080,8 @@ def get_items_keyboard(items, category, page, total_pages, show_vip=False):
     buttons = []
     for item in items:
         item_id, name, full_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
-        version = item[6] if len(item) > 6 else "?"
-        is_vip = item[7] if len(item) > 7 else 0
+        version = item[5] if len(item) > 5 else "?"
+        is_vip = item[6] if len(item) > 6 else 0
         try:
             media_list = json.loads(media_json) if media_json else []
         except:
@@ -1172,6 +1172,44 @@ async def cmd_check_db(message: Message):
         return
     check_all_clients()
     await message.answer("✅ Диагностика выполнена, проверь логи!")
+
+@dp.message(Command("debug_clients"))
+async def debug_clients(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        # Проверяем структуру таблицы
+        cur.execute("PRAGMA table_info(clients)")
+        columns = cur.fetchall()
+        
+        text = "📊 СТРУКТУРА ТАБЛИЦЫ CLIENTS:\n\n"
+        for col in columns:
+            text += f"• {col[1]} (тип: {col[2]})\n"
+        
+        text += "\n📋 ВСЕ КЛИЕНТЫ:\n\n"
+        cur.execute("SELECT id, name, version, download_url FROM clients ORDER BY id DESC")
+        clients = cur.fetchall()
+        
+        for client in clients:
+            text += f"ID: {client[0]}, {client[1]}, версия: '{client[2]}'\n"
+            text += f"   Ссылка: {client[3][:50]}...\n\n"
+        
+        conn.close()
+        
+        # Разбиваем на части если слишком длинное
+        if len(text) > 4000:
+            parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for part in parts:
+                await message.answer(part)
+        else:
+            await message.answer(text)
+            
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -1365,50 +1403,91 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     _, category, item_id = callback.data.split("_")
     item_id = int(item_id)
     user_id = callback.from_user.id
+    
     item = get_item(category, item_id)
     if not item:
         await callback.answer("❌ Не найден", show_alert=True)
         return
+    
+    logger.info(f"📋 Детальный просмотр: {category} ID={item_id}, данные={item}")
+    
     is_admin = (user_id == ADMIN_ID)
     user_status = get_user_status(user_id)
     is_vip = user_status.get('is_vip', False)
-    vip_index = 6 if category == "clients" else (7 if category == "packs" else 6)
-    item_is_vip = item[vip_index] == 1 if len(item) > vip_index else False
-    increment_view(category, item_id)
-    try:
-        media_list = json.loads(item[4]) if item[4] else []
-    except:
-        media_list = []
-    is_fav = False
+    
     if category == "clients":
+        name = item[1]
+        full_desc = item[2]
+        media = item[3]
+        download_url = item[4]
+        version = item[5]
+        item_is_vip = item[6] == 1 if len(item) > 6 else False
         downloads = int(item[7]) if len(item) > 7 and item[7] else 0
         views = int(item[8]) if len(item) > 8 and item[8] else 0
+        
+        try:
+            media_list = json.loads(media) if media else []
+        except:
+            media_list = []
+        
         vip_text = "💎 VIP\n\n" if item_is_vip else ""
-        text = f"🎮 {item[1]}\n\n{vip_text}{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+        text = f"🎮 {name}\n\n{vip_text}{full_desc}\n\nВерсия: {version}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+    
     elif category == "packs":
+        name = item[1]
+        full_desc = item[2]
+        media = item[3]
+        download_url = item[4]
+        version = item[5]
+        author = item[6] if len(item) > 6 else "Неизвестен"
+        item_is_vip = item[7] == 1 if len(item) > 7 else False
+        downloads = int(item[8]) if len(item) > 8 and item[8] else 0
+        likes = int(item[9]) if len(item) > 9 and item[9] else 0
+        views = int(item[10]) if len(item) > 10 and item[10] else 0
+        
+        try:
+            media_list = json.loads(media) if media else []
+        except:
+            media_list = []
+        
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         is_fav = cur.execute('SELECT 1 FROM favorites WHERE user_id = ? AND pack_id = ?', (callback.from_user.id, item_id)).fetchone()
         conn.close()
-        downloads = int(item[8]) if len(item) > 8 and item[8] else 0
-        likes = int(item[9]) if len(item) > 9 and item[9] else 0
-        views = int(item[10]) if len(item) > 10 and item[10] else 0
+        
         vip_text = "💎 VIP\n\n" if item_is_vip else ""
-        text = f"🎨 {item[1]}\n\n{vip_text}{item[2]}\n\nАвтор: {item[6]}\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
+        text = f"🎨 {name}\n\n{vip_text}{full_desc}\n\nАвтор: {author}\nВерсия: {version}\n📥 Скачиваний: {format_number(downloads)}\n❤️ В избранном: {format_number(likes)}\n👁 Просмотров: {format_number(views)}"
+    
     else:
+        name = item[1]
+        full_desc = item[2]
+        media = item[3]
+        download_url = item[4]
+        version = item[5]
+        item_is_vip = item[6] == 1 if len(item) > 6 else False
         downloads = int(item[7]) if len(item) > 7 and item[7] else 0
         views = int(item[8]) if len(item) > 8 and item[8] else 0
+        
+        try:
+            media_list = json.loads(media) if media else []
+        except:
+            media_list = []
+        
         vip_text = "💎 VIP\n\n" if item_is_vip else ""
-        text = f"⚙️ {item[1]}\n\n{vip_text}{item[2]}\n\nВерсия: {item[5]}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+        text = f"⚙️ {name}\n\n{vip_text}{full_desc}\n\nВерсия: {version}\n📥 Скачиваний: {format_number(downloads)}\n👁 Просмотров: {format_number(views)}"
+    
+    increment_view(category, item_id)
+    
     if media_list and media_list[0]['type'] == 'photo':
         try:
-            await callback.message.answer_photo(photo=media_list[0]['id'], caption=text, reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin))
+            await callback.message.answer_photo(photo=media_list[0]['id'], caption=text, reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False, item_is_vip, is_vip, is_admin))
             await callback.message.delete()
         except Exception as e:
             logger.error(f"Ошибка отправки фото: {e}")
-            await callback.message.edit_text(text + "\n\n❌ Фото недоступно", reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin))
+            await callback.message.edit_text(text + "\n\n❌ Фото недоступно", reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False, item_is_vip, is_vip, is_admin))
     else:
-        await callback.message.edit_text(text, reply_markup=get_detail_keyboard(category, item_id, is_fav, item_is_vip, is_vip, is_admin))
+        await callback.message.edit_text(text, reply_markup=get_detail_keyboard(category, item_id, is_fav if category == 'packs' else False, item_is_vip, is_vip, is_admin))
+    
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("back_"))
@@ -1459,22 +1538,27 @@ async def download_item(callback: CallbackQuery):
     is_admin = (user_id == ADMIN_ID)
     user_status = get_user_status(user_id)
     is_vip = user_status.get('is_vip', False)
-    vip_index = 6 if category == "clients" else (7 if category == "packs" else 6)
-    item_is_vip = item[vip_index] == 1 if len(item) > vip_index else False
-    if item_is_vip and not is_vip and not is_admin:
-        await callback.answer("💎 Это VIP контент! Получи VIP статус у админа", show_alert=True)
-        return
-    increment_download(category, item_id, item_is_vip)
-    increment_download_count(user_id, item_is_vip)
+    
     if category == "clients":
+        item_is_vip = item[6] == 1 if len(item) > 6 else False
         url = item[4]
         name = item[1]
     elif category == "packs":
+        item_is_vip = item[7] == 1 if len(item) > 7 else False
         url = item[4]
         name = item[1]
     else:
+        item_is_vip = item[6] == 1 if len(item) > 6 else False
         url = item[4]
         name = item[1]
+    
+    if item_is_vip and not is_vip and not is_admin:
+        await callback.answer("💎 Это VIP контент! Получи VIP статус у админа", show_alert=True)
+        return
+    
+    increment_download(category, item_id, item_is_vip)
+    increment_download_count(user_id, item_is_vip)
+    
     vip_prefix = "💎 " if item_is_vip else ""
     await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{url}")
     await callback.answer("✅ Ссылка отправлена!")
@@ -3038,7 +3122,7 @@ async def main():
     print("   • 👑 VIP управление")
     print("   • 📦 Бэкапы")
     print("   • 📢 Рассылка")
-    print("   • 🔍 Диагностика БД (/check_db)")
+    print("   • 🔍 Диагностика БД (/check_db, /debug_clients)")
     print("="*50)
     try:
         me = await bot.get_me()
