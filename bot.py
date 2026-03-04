@@ -174,15 +174,22 @@ def check_all_clients():
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
-        cur.execute("SELECT id, name, version FROM clients ORDER BY id DESC LIMIT 10")
+        cur.execute("SELECT id, name, version, is_vip FROM clients ORDER BY id DESC LIMIT 20")
         clients = cur.fetchall()
         cur.execute("SELECT DISTINCT version FROM clients WHERE version IS NOT NULL AND version != ''")
         versions = [v[0] for v in cur.fetchall()]
         conn.close()
-        logger.info("📋 Последние 10 клиентов в БД:")
+        print("\n" + "="*50)
+        print("📊 ДИАГНОСТИКА БАЗЫ ДАННЫХ")
+        print("="*50)
+        print(f"📋 Всего клиентов в БД: {len(clients) if clients else 0}")
+        print(f"📋 Уникальные версии: {versions}")
+        print("-"*50)
+        print("📋 Последние 20 клиентов:")
         for client in clients:
-            logger.info(f"   ID: {client[0]}, Name: {client[1]}, Version: '{client[2]}'")
-        logger.info(f"📋 Уникальные версии: {versions}")
+            vip_mark = "💎" if client[3] == 1 else "📦"
+            print(f"   {vip_mark} ID: {client[0]}, {client[1]}, версия: '{client[2]}'")
+        print("="*50 + "\n")
         return clients
     except Exception as e:
         logger.error(f"Ошибка проверки клиентов: {e}")
@@ -582,23 +589,34 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
-        cur.execute("PRAGMA table_info(clients)")
-        columns = [col[1] for col in cur.fetchall()]
+        
         if not version or version.strip() == "":
             version = "1.20"
-        version = version.strip()
-        if 'is_vip' in columns:
-            cur.execute('INSERT INTO clients (name, full_desc, download_url, version, is_vip, media) VALUES (?, ?, ?, ?, ?, ?)', (name, full_desc, url, version, is_vip, media_json))
         else:
-            cur.execute('INSERT INTO clients (name, full_desc, download_url, version, media) VALUES (?, ?, ?, ?, ?)', (name, full_desc, url, version, media_json))
+            version = version.strip()
+            version = version.rstrip('.')
+        
+        cur.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' in columns:
+            cur.execute('INSERT INTO clients (name, full_desc, download_url, version, is_vip, media) VALUES (?, ?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, is_vip, media_json))
+        else:
+            cur.execute('INSERT INTO clients (name, full_desc, download_url, version, media) VALUES (?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
+        
         check_item = get_item("clients", item_id)
         if check_item:
-            logger.info(f"✅ Клиент добавлен: ID={item_id}, name={name}, version={version}")
+            logger.info(f"✅ Клиент добавлен: ID={item_id}, name={name}, version='{version}'")
+            check_all_clients()
         else:
             logger.error(f"❌ Клиент не найден после добавления: ID={item_id}")
+            
         return item_id
     except Exception as e:
         logger.error(f"Ошибка добавления клиента: {e}")
@@ -633,22 +651,38 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         cur = conn.cursor()
         offset = (page - 1) * per_page
         is_admin = (user_id == ADMIN_ID)
+        
+        search_version = version.strip()
+        
+        logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
+        
+        cur.execute("SELECT DISTINCT version FROM clients WHERE version IS NOT NULL")
+        all_versions = [v[0] for v in cur.fetchall()]
+        logger.info(f"📋 Все версии в БД: {all_versions}")
+        
         cur.execute("PRAGMA table_info(clients)")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
-        logger.info(f"Поиск клиентов по версии: '{version}'")
+        
         if has_vip:
-            if is_admin:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
-            else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', 
+                       (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
         else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', 
+                       (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
+        
         items = cur.fetchall()
-        logger.info(f"Найдено клиентов: {len(items)} из {total}")
+        
+        logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
+        
+        if len(items) == 0:
+            cur.execute("SELECT id, name, full_desc, media, downloads, views, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
+            alternative = cur.fetchall()
+            if alternative:
+                logger.info(f"✅ Найдено по LOWER совпадению: {len(alternative)}")
+        
         converted_items = []
         for item in items:
             item_list = list(item)
@@ -663,6 +697,7 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
                 except:
                     item_list[5] = 0
             converted_items.append(tuple(item_list))
+        
         conn.close()
         return converted_items, total
     except Exception as e:
@@ -673,9 +708,17 @@ def get_all_client_versions(user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
-        cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL AND version != "" ORDER BY version DESC')
-        versions = [v[0] for v in cur.fetchall()]
-        logger.info(f"📋 Найденные версии клиентов: {versions}")
+        
+        cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL AND version != ""')
+        versions = []
+        for v in cur.fetchall():
+            clean_version = v[0].strip()
+            if clean_version and clean_version not in versions:
+                versions.append(clean_version)
+        
+        versions.sort(reverse=True)
+        
+        logger.info(f"📋 Найденные версии клиентов (очищенные): {versions}")
         conn.close()
         return versions
     except Exception as e:
@@ -736,16 +779,17 @@ def get_packs_by_version(version, page=1, per_page=10, user_id=None):
         cur.execute("PRAGMA table_info(resourcepacks)")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
+        search_version = version.strip()
         if has_vip:
             if is_admin:
-                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
             else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
         else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, 0 as is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+            cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, 0 as is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
         items = cur.fetchall()
         converted_items = []
         for item in items:
@@ -838,16 +882,17 @@ def get_configs_by_version(version, page=1, per_page=10, user_id=None):
         cur.execute("PRAGMA table_info(configs)")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
+        search_version = version.strip()
         if has_vip:
             if is_admin:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
             else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
         else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
         items = cur.fetchall()
         converted_items = []
         for item in items:
@@ -1120,6 +1165,13 @@ def get_profile_keyboard():
         [InlineKeyboardButton(text="📊 История", callback_data="profile_history")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@dp.message(Command("check_db"))
+async def cmd_check_db(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    check_all_clients()
+    await message.answer("✅ Диагностика выполнена, проверь логи!")
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -1481,11 +1533,11 @@ async def info(message: Message):
         else:
             vip_configs = 0
         conn.close()
-        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 19.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
+        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 20.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 19.0")
+        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 20.0")
 
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
@@ -2986,6 +3038,7 @@ async def main():
     print("   • 👑 VIP управление")
     print("   • 📦 Бэкапы")
     print("   • 📢 Рассылка")
+    print("   • 🔍 Диагностика БД (/check_db)")
     print("="*50)
     try:
         me = await bot.get_me()
