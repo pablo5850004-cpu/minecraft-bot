@@ -56,59 +56,97 @@ BACKUP_DIR.mkdir(exist_ok=True)
 print(f"📁 Папка данных: {DATA_DIR}")
 print(f"📁 Папка бэкапов: {BACKUP_DIR}")
 
-# ========== ИНИЦИАЛИЗАЦИЯ БАЗ ДАННЫХ ==========
-def init_db():
+# ========== ФУНКЦИИ ДЛЯ ПРОВЕРКИ И ОБНОВЛЕНИЯ СТРУКТУРЫ БД ==========
+def check_and_update_db():
+    """Проверяет и обновляет структуру базы данных"""
     try:
+        # Проверяем clients.db
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS clients (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Получаем список таблиц
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [table[0] for table in cur.fetchall()]
         
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS resourcepacks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                author TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                likes INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Обновляем таблицу clients
+        if 'clients' in tables:
+            cur.execute("PRAGMA table_info(clients)")
+            columns = [column[1] for column in cur.fetchall()]
+            
+            if 'is_vip' not in columns:
+                cur.execute("ALTER TABLE clients ADD COLUMN is_vip INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка is_vip в таблицу clients")
+        else:
+            # Создаем таблицу clients если её нет
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clients (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    full_desc TEXT NOT NULL,
+                    media TEXT DEFAULT '[]',
+                    download_url TEXT NOT NULL,
+                    version TEXT,
+                    is_vip INTEGER DEFAULT 0,
+                    downloads INTEGER DEFAULT 0,
+                    views INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Создана таблица clients")
         
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS configs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Обновляем таблицу resourcepacks
+        if 'resourcepacks' in tables:
+            cur.execute("PRAGMA table_info(resourcepacks)")
+            columns = [column[1] for column in cur.fetchall()]
+            
+            if 'is_vip' not in columns:
+                cur.execute("ALTER TABLE resourcepacks ADD COLUMN is_vip INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка is_vip в таблицу resourcepacks")
+        else:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS resourcepacks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    full_desc TEXT NOT NULL,
+                    media TEXT DEFAULT '[]',
+                    download_url TEXT NOT NULL,
+                    version TEXT,
+                    author TEXT,
+                    is_vip INTEGER DEFAULT 0,
+                    downloads INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    views INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Создана таблица resourcepacks")
         
+        # Обновляем таблицу configs
+        if 'configs' in tables:
+            cur.execute("PRAGMA table_info(configs)")
+            columns = [column[1] for column in cur.fetchall()]
+            
+            if 'is_vip' not in columns:
+                cur.execute("ALTER TABLE configs ADD COLUMN is_vip INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка is_vip в таблицу configs")
+        else:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    full_desc TEXT NOT NULL,
+                    media TEXT DEFAULT '[]',
+                    download_url TEXT NOT NULL,
+                    version TEXT,
+                    is_vip INTEGER DEFAULT 0,
+                    downloads INTEGER DEFAULT 0,
+                    views INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Создана таблица configs")
+        
+        # Создаем таблицу favorites если её нет
         cur.execute('''
             CREATE TABLE IF NOT EXISTS favorites (
                 user_id INTEGER NOT NULL,
@@ -120,30 +158,44 @@ def init_db():
         
         conn.commit()
         conn.close()
-        print("✅ База данных клиентов готова")
-    except Exception as e:
-        print(f"❌ Ошибка при создании базы клиентов: {e}")
-
-def init_users_db():
-    try:
+        
+        # Проверяем users.db
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                balance INTEGER DEFAULT 0,
-                is_vip INTEGER DEFAULT 0,
-                invites INTEGER DEFAULT 0,
-                downloads_total INTEGER DEFAULT 0,
-                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [table[0] for table in cur.fetchall()]
         
+        # Обновляем таблицу users
+        if 'users' in tables:
+            cur.execute("PRAGMA table_info(users)")
+            columns = [column[1] for column in cur.fetchall()]
+            
+            if 'balance' not in columns:
+                cur.execute("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка balance в таблицу users")
+            
+            if 'is_vip' not in columns:
+                cur.execute("ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка is_vip в таблицу users")
+        else:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    balance INTEGER DEFAULT 0,
+                    is_vip INTEGER DEFAULT 0,
+                    invites INTEGER DEFAULT 0,
+                    downloads_total INTEGER DEFAULT 0,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Создана таблица users")
+        
+        # Создаем таблицу referrals если её нет
         cur.execute('''
             CREATE TABLE IF NOT EXISTS referrals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,17 +205,28 @@ def init_users_db():
             )
         ''')
         
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS downloads_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                item_type TEXT NOT NULL,
-                item_id INTEGER NOT NULL,
-                vip_item INTEGER DEFAULT 0,
-                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Создаем или обновляем таблицу downloads_log
+        if 'downloads_log' in tables:
+            cur.execute("PRAGMA table_info(downloads_log)")
+            columns = [column[1] for column in cur.fetchall()]
+            
+            if 'vip_item' not in columns:
+                cur.execute("ALTER TABLE downloads_log ADD COLUMN vip_item INTEGER DEFAULT 0")
+                print("✅ Добавлена колонка vip_item в таблицу downloads_log")
+        else:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS downloads_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    item_type TEXT NOT NULL,
+                    item_id INTEGER NOT NULL,
+                    vip_item INTEGER DEFAULT 0,
+                    downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("✅ Создана таблица downloads_log")
         
+        # Создаем таблицу balance_history если её нет
         cur.execute('''
             CREATE TABLE IF NOT EXISTS balance_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,14 +240,126 @@ def init_users_db():
         
         conn.commit()
         conn.close()
-        print("✅ База данных пользователей готова")
+        
+        print("✅ Проверка и обновление структуры БД завершены")
+        return True
     except Exception as e:
-        print(f"❌ Ошибка при создании базы пользователей: {e}")
+        print(f"❌ Ошибка при проверке БД: {e}")
+        return False
 
-init_db()
-init_users_db()
+# Вызываем проверку структуры БД
+check_and_update_db()
 
-# ========== ФУНКЦИИ ДЛЯ ПОЛЬЗОВАТЕЛЕЙ ==========
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С БЭКАПАМИ ==========
+def get_all_backups():
+    """Получает список всех бэкапов с сортировкой по дате"""
+    try:
+        files = os.listdir(str(BACKUP_DIR))
+        backups = [f for f in files if f.endswith('.zip')]
+        # Сортируем по дате (новые сверху)
+        backups.sort(reverse=True)
+        return backups
+    except Exception as e:
+        print(f"Ошибка получения списка бэкапов: {e}")
+        return []
+
+def check_backup_structure(zip_path):
+    """Проверяет структуру бэкапа и возвращает список проблем"""
+    issues = []
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            files = zipf.namelist()
+            
+            if 'clients.db' not in files:
+                issues.append("❌ Отсутствует clients.db")
+            if 'users.db' not in files:
+                issues.append("❌ Отсутствует users.db")
+            
+            # Проверяем, что файлы не пустые
+            for file in files:
+                info = zipf.getinfo(file)
+                if info.file_size == 0:
+                    issues.append(f"⚠️ Файл {file} пустой")
+            
+        return issues
+    except zipfile.BadZipFile:
+        return ["❌ Файл поврежден (не является ZIP архивом)"]
+    except Exception as e:
+        return [f"❌ Ошибка проверки: {str(e)}"]
+
+async def create_zip_backup():
+    """Создает новый бэкап"""
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_filename = f"backup_{timestamp}.zip"
+        zip_path = BACKUP_DIR / zip_filename
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if DB_PATH.exists():
+                zipf.write(DB_PATH, 'clients.db')
+            if USERS_DB_PATH.exists():
+                zipf.write(USERS_DB_PATH, 'users.db')
+        
+        if zip_path.exists():
+            return str(zip_path), zip_filename
+        return None, None
+    except Exception as e:
+        logger.error(f"Ошибка создания бэкапа: {e}")
+        return None, None
+
+async def restore_from_zip(zip_path):
+    """Восстанавливает базу из бэкапа"""
+    try:
+        # Создаем временную папку для распаковки
+        extract_dir = BACKUP_DIR / f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Распаковываем
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            zipf.extractall(extract_dir)
+        
+        restored = False
+        restored_files = []
+        
+        # Копируем файлы
+        for file in extract_dir.iterdir():
+            if file.name == 'clients.db':
+                # Сначала делаем резервную копию текущего файла
+                if DB_PATH.exists():
+                    backup_path = BACKUP_DIR / f"pre_restore_clients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                    shutil.copy2(DB_PATH, backup_path)
+                
+                shutil.copy2(file, DB_PATH)
+                restored = True
+                restored_files.append('clients.db')
+                
+            elif file.name == 'users.db':
+                if USERS_DB_PATH.exists():
+                    backup_path = BACKUP_DIR / f"pre_restore_users_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                    shutil.copy2(USERS_DB_PATH, backup_path)
+                
+                shutil.copy2(file, USERS_DB_PATH)
+                restored = True
+                restored_files.append('users.db')
+        
+        # Удаляем временную папку
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        
+        if restored:
+            logger.info(f"✅ Восстановлены файлы: {', '.join(restored_files)}")
+        else:
+            logger.warning("⚠️ Не найдены файлы для восстановления")
+        
+        # После восстановления проверяем и обновляем структуру БД
+        if restored:
+            check_and_update_db()
+        
+        return restored
+    except Exception as e:
+        logger.error(f"Ошибка восстановления: {e}")
+        return False
+
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ ==========
 def get_users_count() -> int:
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
@@ -201,10 +376,18 @@ def get_vip_users_count() -> int:
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        cur.execute('SELECT COUNT(*) FROM users WHERE is_vip = 1')
-        result = cur.fetchone()
-        conn.close()
-        return result[0] if result else 0
+        # Проверяем существование колонки is_vip
+        cur.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' in columns:
+            cur.execute('SELECT COUNT(*) FROM users WHERE is_vip = 1')
+            result = cur.fetchone()
+            conn.close()
+            return result[0] if result else 0
+        else:
+            conn.close()
+            return 0
     except Exception as e:
         logger.error(f"Ошибка получения количества VIP пользователей: {e}")
         return 0
@@ -221,44 +404,32 @@ def get_all_users() -> list:
         logger.error(f"Ошибка получения списка пользователей: {e}")
         return []
 
-def get_all_users_with_details() -> list:
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        cur.execute('SELECT user_id, username, first_name, balance, is_vip FROM users ORDER BY last_active DESC')
-        users = cur.fetchall()
-        conn.close()
-        return users
-    except Exception as e:
-        logger.error(f"Ошибка получения списка пользователей: {e}")
-        return []
-
 def get_user_status(user_id: int) -> dict:
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if not cur.fetchone():
-            logger.error("Таблица users не существует")
-            conn.close()
-            return {
-                'user_id': user_id,
-                'is_admin': (user_id == ADMIN_ID),
-                'balance': 0,
-                'is_vip': False,
-                'invites': 0,
-                'downloads_total': 0
-            }
+        # Проверяем существование колонок
+        cur.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cur.fetchall()]
         
-        cur.execute('SELECT user_id, username, balance, is_vip, invites, downloads_total FROM users WHERE user_id = ?', (user_id,))
+        has_balance = 'balance' in columns
+        has_vip = 'is_vip' in columns
+        
+        cur.execute('SELECT user_id, username, invites, downloads_total FROM users WHERE user_id = ?', (user_id,))
         user = cur.fetchone()
         
         if not user:
             try:
-                cur.execute('''
-                    INSERT INTO users (user_id, last_active) VALUES (?, CURRENT_TIMESTAMP)
-                ''', (user_id,))
+                if has_balance and has_vip:
+                    cur.execute('''
+                        INSERT INTO users (user_id, balance, is_vip, last_active) 
+                        VALUES (?, 0, 0, CURRENT_TIMESTAMP)
+                    ''', (user_id,))
+                else:
+                    cur.execute('''
+                        INSERT INTO users (user_id, last_active) VALUES (?, CURRENT_TIMESTAMP)
+                    ''', (user_id,))
                 conn.commit()
                 logger.info(f"Создан новый пользователь: {user_id}")
             except Exception as e:
@@ -273,13 +444,27 @@ def get_user_status(user_id: int) -> dict:
                 'downloads_total': 0
             }
         else:
+            # Получаем баланс и VIP статус если они есть
+            balance = 0
+            is_vip = False
+            
+            if has_balance:
+                cur.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
+                bal_result = cur.fetchone()
+                balance = bal_result[0] if bal_result else 0
+            
+            if has_vip:
+                cur.execute('SELECT is_vip FROM users WHERE user_id = ?', (user_id,))
+                vip_result = cur.fetchone()
+                is_vip = vip_result[0] == 1 if vip_result else False
+            
             status_data = {
                 'user_id': user[0],
                 'is_admin': (user_id == ADMIN_ID),
-                'balance': user[2] if user[2] is not None else 0,
-                'is_vip': user[3] == 1,
-                'invites': user[4] if user[4] is not None else 0,
-                'downloads_total': user[5] if user[5] is not None else 0
+                'balance': balance,
+                'is_vip': is_vip,
+                'invites': user[2] if user[2] is not None else 0,
+                'downloads_total': user[3] if user[3] is not None else 0
             }
         
         conn.close()
@@ -301,6 +486,13 @@ def add_balance(user_id: int, amount: int, admin_id: int = None):
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
         
+        # Проверяем существование колонки balance
+        cur.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'balance' not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
+        
         cur.execute('''
             UPDATE users SET 
                 balance = COALESCE(balance, 0) + ?,
@@ -320,40 +512,17 @@ def add_balance(user_id: int, amount: int, admin_id: int = None):
         logger.error(f"Ошибка добавления баланса для {user_id}: {e}")
         return False
 
-def remove_balance(user_id: int, amount: int, admin_id: int = None):
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        
-        cur.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
-        result = cur.fetchone()
-        if not result or result[0] < amount:
-            conn.close()
-            return False
-        
-        cur.execute('''
-            UPDATE users SET 
-                balance = balance - ?,
-                last_active = CURRENT_TIMESTAMP 
-            WHERE user_id = ?
-        ''', (amount, user_id))
-        
-        cur.execute('''
-            INSERT INTO balance_history (user_id, amount, action, admin_id)
-            VALUES (?, ?, 'remove', ?)
-        ''', (user_id, amount, admin_id))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка списания баланса для {user_id}: {e}")
-        return False
-
 def set_user_vip(user_id: int, admin_id: int = None):
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
+        
+        # Проверяем существование колонки is_vip
+        cur.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN is_vip INTEGER DEFAULT 0")
         
         cur.execute('''
             UPDATE users SET 
@@ -375,31 +544,6 @@ def set_user_vip(user_id: int, admin_id: int = None):
         logger.error(f"Ошибка установки VIP статуса для {user_id}: {e}")
         return False
 
-def remove_user_vip(user_id: int, admin_id: int = None):
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        
-        cur.execute('''
-            UPDATE users SET 
-                is_vip = 0,
-                last_active = CURRENT_TIMESTAMP 
-            WHERE user_id = ?
-        ''', (user_id,))
-        
-        cur.execute('''
-            INSERT INTO balance_history (user_id, action, admin_id)
-            VALUES (?, 'vip_remove', ?)
-        ''', (user_id, admin_id))
-        
-        conn.commit()
-        conn.close()
-        logger.info(f"VIP статус снят с пользователя {user_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка снятия VIP статуса для {user_id}: {e}")
-        return False
-
 def increment_download_count(user_id: int, vip_item: bool = False):
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
@@ -417,35 +561,19 @@ def increment_download_count(user_id: int, vip_item: bool = False):
         ''', (user_id,))
         conn.commit()
         conn.close()
-    except Exception as e:
-        logger.error(f"Ошибка увеличения счётчика для {user_id}: {e}")
-
-def add_referral(referrer_id: int, referred_id: int):
-    try:
+        
+        # Логируем скачивание
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
-        
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='referrals'")
-        if not cur.fetchone():
-            logger.error("Таблица referrals не существует")
-            conn.close()
-            return False
-        
         cur.execute('''
-            INSERT OR IGNORE INTO referrals (referrer_id, referred_id) VALUES (?, ?)
-        ''', (referrer_id, referred_id))
-        
-        if cur.rowcount > 0:
-            cur.execute('''
-                UPDATE users SET invites = COALESCE(invites, 0) + 1 WHERE user_id = ?
-            ''', (referrer_id,))
-        
+            INSERT INTO downloads_log (user_id, item_type, item_id, vip_item) 
+            VALUES (?, 'download', 0, ?)
+        ''', (user_id, 1 if vip_item else 0))
         conn.commit()
         conn.close()
-        return True
+        
     except Exception as e:
-        logger.error(f"Ошибка добавления реферала: {e}")
-        return False
+        logger.error(f"Ошибка увеличения счётчика для {user_id}: {e}")
 
 def save_user(message: Message):
     try:
@@ -474,9 +602,6 @@ def save_user(message: Message):
                 INSERT INTO users (user_id, username, first_name, last_name, last_active)
                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (user_id, username, first_name, last_name))
-            
-            if referrer_id:
-                add_referral(referrer_id, user_id)
         else:
             cur.execute('''
                 UPDATE users SET 
@@ -503,29 +628,10 @@ def get_item(table: str, item_id: int):
         
         if item:
             item_list = list(item)
-            if table == "clients":
-                if len(item_list) > 6 and item_list[6] is not None:
-                    item_list[6] = int(item_list[6])
-                if len(item_list) > 7 and item_list[7] is not None:
-                    item_list[7] = int(item_list[7])
-                if len(item_list) > 8 and item_list[8] is not None:
-                    item_list[8] = int(item_list[8])
-            elif table == "resourcepacks":
-                if len(item_list) > 7 and item_list[7] is not None:
-                    item_list[7] = int(item_list[7])
-                if len(item_list) > 8 and item_list[8] is not None:
-                    item_list[8] = int(item_list[8])
-                if len(item_list) > 9 and item_list[9] is not None:
-                    item_list[9] = int(item_list[9])
-                if len(item_list) > 10 and item_list[10] is not None:
-                    item_list[10] = int(item_list[10])
-            elif table == "configs":
-                if len(item_list) > 6 and item_list[6] is not None:
-                    item_list[6] = int(item_list[6])
-                if len(item_list) > 7 and item_list[7] is not None:
-                    item_list[7] = int(item_list[7])
-                if len(item_list) > 8 and item_list[8] is not None:
-                    item_list[8] = int(item_list[8])
+            # Безопасно преобразуем числа
+            for i in range(len(item_list)):
+                if isinstance(item_list[i], (int, float, str)) and str(item_list[i]).isdigit():
+                    item_list[i] = int(item_list[i])
             
             return tuple(item_list)
         return item
@@ -539,27 +645,35 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         cur = conn.cursor()
         offset = (page - 1) * per_page
         
-        if vip_filter == "vip":
-            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
-        elif vip_filter == "regular":
-            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+        # Проверяем наличие колонки is_vip
+        cur.execute(f"PRAGMA table_info({table})")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            if vip_filter == "vip":
+                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 1').fetchone()[0]
+            elif vip_filter == "regular":
+                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 0').fetchone()[0]
+            else:
+                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         else:
-            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+            total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         
         items = cur.fetchall()
-        
-        if vip_filter == "vip":
-            total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 1').fetchone()[0]
-        elif vip_filter == "regular":
-            total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 0').fetchone()[0]
-        else:
-            total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
         
         converted_items = []
         for item in items:
             item_list = list(item)
             if len(item_list) > 4 and item_list[4] is not None:
-                item_list[4] = int(item_list[4])
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -572,6 +686,13 @@ def toggle_item_vip(table: str, item_id: int):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        
+        # Проверяем наличие колонки is_vip
+        cur.execute(f"PRAGMA table_info({table})")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' not in columns:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN is_vip INTEGER DEFAULT 0")
         
         cur.execute(f'SELECT is_vip FROM {table} WHERE id = ?', (item_id,))
         result = cur.fetchone()
@@ -604,10 +725,22 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
-        cur.execute('''
-            INSERT INTO clients (name, full_desc, download_url, version, is_vip, media)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, is_vip, media_json))
+        
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' in columns:
+            cur.execute('''
+                INSERT INTO clients (name, full_desc, download_url, version, is_vip, media)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, is_vip, media_json))
+        else:
+            cur.execute('''
+                INSERT INTO clients (name, full_desc, download_url, version, media)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -647,15 +780,27 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         is_admin = (user_id == ADMIN_ID)
         
-        if is_admin:
-            cur.execute('''
-                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
-                FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-            ''', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            if is_admin:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                    FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
+            else:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                    FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
         else:
             cur.execute('''
-                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip 
                 FROM clients WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
             ''', (version, per_page, offset))
             total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (version,)).fetchone()[0]
@@ -666,9 +811,15 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         for item in items:
             item_list = list(item)
             if len(item_list) > 4 and item_list[4] is not None:
-                item_list[4] = int(item_list[4])
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
             if len(item_list) > 5 and item_list[5] is not None:
-                item_list[5] = int(item_list[5])
+                try:
+                    item_list[5] = int(item_list[5])
+                except:
+                    item_list[5] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -696,10 +847,22 @@ def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
-        cur.execute('''
-            INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, media)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, author, is_vip, media_json))
+        
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(resourcepacks)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' in columns:
+            cur.execute('''
+                INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, media)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, author, is_vip, media_json))
+        else:
+            cur.execute('''
+                INSERT INTO resourcepacks (name, full_desc, download_url, version, author, media)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, author, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -739,15 +902,27 @@ def get_packs_by_version(version, page=1, per_page=10, user_id=None):
         
         is_admin = (user_id == ADMIN_ID)
         
-        if is_admin:
-            cur.execute('''
-                SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
-                FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-            ''', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(resourcepacks)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            if is_admin:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
+                    FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
+            else:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
+                    FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
         else:
             cur.execute('''
-                SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip 
+                SELECT id, name, full_desc, media, downloads, likes, views, version, author, 0 as is_vip 
                 FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
             ''', (version, per_page, offset))
             total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (version,)).fetchone()[0]
@@ -758,11 +933,20 @@ def get_packs_by_version(version, page=1, per_page=10, user_id=None):
         for item in items:
             item_list = list(item)
             if len(item_list) > 4 and item_list[4] is not None:
-                item_list[4] = int(item_list[4])
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
             if len(item_list) > 5 and item_list[5] is not None:
-                item_list[5] = int(item_list[5])
+                try:
+                    item_list[5] = int(item_list[5])
+                except:
+                    item_list[5] = 0
             if len(item_list) > 6 and item_list[6] is not None:
-                item_list[6] = int(item_list[6])
+                try:
+                    item_list[6] = int(item_list[6])
+                except:
+                    item_list[6] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -790,10 +974,22 @@ def add_config(name, full_desc, url, version, is_vip=0, media=None):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         media_json = json.dumps(media or [])
-        cur.execute('''
-            INSERT INTO configs (name, full_desc, download_url, version, is_vip, media)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, full_desc, url, version, is_vip, media_json))
+        
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(configs)")
+        columns = [col[1] for col in cur.fetchall()]
+        
+        if 'is_vip' in columns:
+            cur.execute('''
+                INSERT INTO configs (name, full_desc, download_url, version, is_vip, media)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, is_vip, media_json))
+        else:
+            cur.execute('''
+                INSERT INTO configs (name, full_desc, download_url, version, media)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (name, full_desc, url, version, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
@@ -833,15 +1029,27 @@ def get_configs_by_version(version, page=1, per_page=10, user_id=None):
         
         is_admin = (user_id == ADMIN_ID)
         
-        if is_admin:
-            cur.execute('''
-                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
-                FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
-            ''', (version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(configs)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            if is_admin:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                    FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
+            else:
+                cur.execute('''
+                    SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                    FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
+                ''', (version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
         else:
             cur.execute('''
-                SELECT id, name, full_desc, media, downloads, views, version, is_vip 
+                SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip 
                 FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?
             ''', (version, per_page, offset))
             total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (version,)).fetchone()[0]
@@ -852,9 +1060,15 @@ def get_configs_by_version(version, page=1, per_page=10, user_id=None):
         for item in items:
             item_list = list(item)
             if len(item_list) > 4 and item_list[4] is not None:
-                item_list[4] = int(item_list[4])
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
             if len(item_list) > 5 and item_list[5] is not None:
-                item_list[5] = int(item_list[5])
+                try:
+                    item_list[5] = int(item_list[5])
+                except:
+                    item_list[5] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -903,11 +1117,23 @@ def get_favorites(user_id):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
-        cur.execute('''
-            SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes, r.is_vip 
-            FROM resourcepacks r JOIN favorites f ON r.id = f.pack_id
-            WHERE f.user_id = ? ORDER BY f.added_at DESC
-        ''', (user_id,))
+        # Проверяем наличие колонки is_vip
+        cur.execute("PRAGMA table_info(resourcepacks)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            cur.execute('''
+                SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes, r.is_vip 
+                FROM resourcepacks r JOIN favorites f ON r.id = f.pack_id
+                WHERE f.user_id = ? ORDER BY f.added_at DESC
+            ''', (user_id,))
+        else:
+            cur.execute('''
+                SELECT r.id, r.name, r.full_desc, r.media, r.downloads, r.likes, 0 as is_vip 
+                FROM resourcepacks r JOIN favorites f ON r.id = f.pack_id
+                WHERE f.user_id = ? ORDER BY f.added_at DESC
+            ''', (user_id,))
         
         favs = cur.fetchall()
         
@@ -915,9 +1141,15 @@ def get_favorites(user_id):
         for fav in favs:
             fav_list = list(fav)
             if len(fav_list) > 4 and fav_list[4] is not None:
-                fav_list[4] = int(fav_list[4])
+                try:
+                    fav_list[4] = int(fav_list[4])
+                except:
+                    fav_list[4] = 0
             if len(fav_list) > 5 and fav_list[5] is not None:
-                fav_list[5] = int(fav_list[5])
+                try:
+                    fav_list[5] = int(fav_list[5])
+                except:
+                    fav_list[5] = 0
             converted_favs.append(tuple(fav_list))
         
         conn.close()
@@ -946,74 +1178,6 @@ def increment_download(table, item_id, vip_item=False):
         conn.close()
     except Exception as e:
         logger.error(f"Ошибка увеличения скачиваний: {e}")
-
-# ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
-def get_all_backups():
-    try:
-        files = os.listdir(str(BACKUP_DIR))
-        backups = [f for f in files if f.endswith('.zip')]
-        backups.sort(reverse=True)
-        return backups
-    except Exception as e:
-        print(f"Ошибка получения списка бэкапов: {e}")
-        return []
-
-async def create_zip_backup():
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        zip_filename = f"backup_{timestamp}.zip"
-        zip_path = BACKUP_DIR / zip_filename
-        
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            if DB_PATH.exists():
-                zipf.write(DB_PATH, 'clients.db')
-            if USERS_DB_PATH.exists():
-                zipf.write(USERS_DB_PATH, 'users.db')
-        
-        if zip_path.exists():
-            return str(zip_path), zip_filename
-        return None, None
-    except Exception as e:
-        logger.error(f"Ошибка создания бэкапа: {e}")
-        return None, None
-
-async def restore_from_zip(zip_path):
-    try:
-        extract_dir = BACKUP_DIR / f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        extract_dir.mkdir(parents=True, exist_ok=True)
-        
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            zipf.extractall(extract_dir)
-        
-        restored = False
-        for file in extract_dir.iterdir():
-            if file.name == 'clients.db':
-                shutil.copy2(file, DB_PATH)
-                restored = True
-            elif file.name == 'users.db':
-                shutil.copy2(file, USERS_DB_PATH)
-                restored = True
-        
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        return restored
-    except Exception as e:
-        logger.error(f"Ошибка восстановления: {e}")
-        return False
-
-def check_backup_structure(zip_path):
-    issues = []
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zipf:
-            files = zipf.namelist()
-            
-            if 'clients.db' not in files:
-                issues.append("❌ Отсутствует файл clients.db")
-            if 'users.db' not in files:
-                issues.append("❌ Отсутствует файл users.db")
-            
-        return issues
-    except Exception as e:
-        return [f"❌ Ошибка проверки архива: {str(e)}"]
 
 # ========== ФУНКЦИЯ ФОРМАТИРОВАНИЯ ЧИСЕЛ ==========
 def format_number(num):
@@ -1469,6 +1633,18 @@ async def balance_history(callback: CallbackQuery):
     try:
         conn = sqlite3.connect(str(USERS_DB_PATH))
         cur = conn.cursor()
+        
+        # Проверяем существование таблицы
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='balance_history'")
+        if not cur.fetchone():
+            await callback.message.edit_text(
+                "📭 История операций пуста",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_profile")]])
+            )
+            conn.close()
+            await callback.answer()
+            return
+        
         history = cur.execute('''
             SELECT amount, action, created_at FROM balance_history 
             WHERE user_id = ? ORDER BY created_at DESC LIMIT 10
@@ -1555,6 +1731,7 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     user_status = get_user_status(user_id)
     is_vip = user_status.get('is_vip', False)
     
+    # Определяем индекс is_vip в зависимости от таблицы
     vip_index = 6 if category == "clients" else (7 if category == "packs" else 6)
     item_is_vip = item[vip_index] == 1 if len(item) > vip_index else False
     
@@ -1675,16 +1852,7 @@ async def download_item(callback: CallbackQuery):
     increment_download(category, item_id, item_is_vip)
     increment_download_count(user_id, item_is_vip)
     
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        cur.execute('INSERT INTO downloads_log (user_id, item_type, item_id, vip_item) VALUES (?, ?, ?, ?)', 
-                   (user_id, category, item_id, 1 if item_is_vip else 0))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Ошибка логирования скачивания: {e}")
-    
+    # Правильные индексы для ссылки
     if category == "clients":
         url = item[4]
         name = item[1]
@@ -1733,17 +1901,39 @@ async def info(message: Message):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         clients_count = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
-        vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
+        
+        # Безопасно получаем количество VIP
+        cur.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in cur.fetchall()]
+        if 'is_vip' in columns:
+            vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
+        else:
+            vip_clients = 0
+            
         packs_count = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
-        vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
+        
+        cur.execute("PRAGMA table_info(resourcepacks)")
+        columns = [col[1] for col in cur.fetchall()]
+        if 'is_vip' in columns:
+            vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
+        else:
+            vip_packs = 0
+            
         configs_count = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
-        vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
+        
+        cur.execute("PRAGMA table_info(configs)")
+        columns = [col[1] for col in cur.fetchall()]
+        if 'is_vip' in columns:
+            vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
+        else:
+            vip_configs = 0
+            
         conn.close()
         
         text = (
             f"ℹ️ Информация о боте\n\n"
             f"Создатель: {CREATOR_USERNAME}\n"
-            f"Версия: 18.0\n\n"
+            f"Версия: 19.0\n\n"
             f"📊 Статистика:\n"
             f"• Пользователей: {users_count} (💎 VIP: {vip_count})\n"
             f"• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n"
@@ -1754,7 +1944,7 @@ async def info(message: Message):
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 18.0")
+        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 19.0")
 
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
@@ -1965,7 +2155,26 @@ async def admin_balance_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    users = get_all_users_with_details()
+    conn = sqlite3.connect(str(USERS_DB_PATH))
+    cur = conn.cursor()
+    
+    # Проверяем наличие колонок
+    cur.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cur.fetchall()]
+    has_balance = 'balance' in columns
+    has_vip = 'is_vip' in columns
+    
+    if has_balance and has_vip:
+        cur.execute('SELECT user_id, username, first_name, balance, is_vip FROM users ORDER BY last_active DESC LIMIT 50')
+    elif has_balance:
+        cur.execute('SELECT user_id, username, first_name, balance, 0 as is_vip FROM users ORDER BY last_active DESC LIMIT 50')
+    elif has_vip:
+        cur.execute('SELECT user_id, username, first_name, 0 as balance, is_vip FROM users ORDER BY last_active DESC LIMIT 50')
+    else:
+        cur.execute('SELECT user_id, username, first_name, 0 as balance, 0 as is_vip FROM users ORDER BY last_active DESC LIMIT 50')
+    
+    users = cur.fetchall()
+    conn.close()
     
     if not users:
         await callback.message.edit_text(
@@ -1975,14 +2184,12 @@ async def admin_balance_list(callback: CallbackQuery):
         await callback.answer()
         return
     
-    text = "💰 Список пользователей:\n\n"
-    for user_id, username, first_name, balance, is_vip in users[:20]:
+    text = "💰 Список пользователей (последние 50):\n\n"
+    for user_id, username, first_name, balance, is_vip in users:
         name = first_name or username or str(user_id)
         vip_mark = "💎" if is_vip else "👤"
-        text += f"• {vip_mark} {name} (ID: {user_id}) - {balance}₽\n"
-    
-    if len(users) > 20:
-        text += f"\n... и еще {len(users) - 20} пользователей"
+        balance_str = f"{balance}₽" if balance is not None else "0₽"
+        text += f"• {vip_mark} {name} (ID: {user_id}) - {balance_str}\n"
     
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_balance")]]))
     await callback.answer()
@@ -2009,8 +2216,20 @@ async def vip_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    users = get_all_users_with_details()
-    vip_users = [u for u in users if u[4] == 1]
+    conn = sqlite3.connect(str(USERS_DB_PATH))
+    cur = conn.cursor()
+    
+    # Проверяем наличие колонки is_vip
+    cur.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cur.fetchall()]
+    
+    if 'is_vip' in columns:
+        cur.execute('SELECT user_id, username, first_name, balance FROM users WHERE is_vip = 1 ORDER BY last_active DESC')
+        vip_users = cur.fetchall()
+    else:
+        vip_users = []
+    
+    conn.close()
     
     if not vip_users:
         await callback.message.edit_text(
@@ -2021,9 +2240,10 @@ async def vip_list(callback: CallbackQuery):
         return
     
     text = "👑 VIP пользователи:\n\n"
-    for user_id, username, first_name, balance, is_vip in vip_users:
+    for user_id, username, first_name, balance in vip_users:
         name = first_name or username or str(user_id)
-        text += f"• {name} (ID: {user_id}) - баланс: {balance}₽\n"
+        balance_str = f"{balance}₽" if balance is not None else "0₽"
+        text += f"• {name} (ID: {user_id}) - баланс: {balance_str}\n"
     
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_vip")]]))
     await callback.answer()
@@ -2108,6 +2328,7 @@ async def vip_remove_user_id(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Ошибка при снятии VIP статуса")
 
+# ========== АДМИН: КЛИЕНТЫ ==========
 @dp.callback_query(lambda c: c.data == "admin_clients")
 async def admin_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2124,6 +2345,7 @@ async def admin_clients(callback: CallbackQuery):
     await callback.message.edit_text("🎮 Управление клиентами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== АДМИН: РЕСУРСПАКИ ==========
 @dp.callback_query(lambda c: c.data == "admin_packs")
 async def admin_packs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2140,6 +2362,7 @@ async def admin_packs(callback: CallbackQuery):
     await callback.message.edit_text("🎨 Управление ресурспаками\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== АДМИН: КОНФИГИ ==========
 @dp.callback_query(lambda c: c.data == "admin_configs")
 async def admin_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2156,6 +2379,7 @@ async def admin_configs(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ Управление конфигами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== АДМИН: ПЕРЕКЛЮЧЕНИЕ VIP ==========
 @dp.callback_query(lambda c: c.data.startswith("toggle_vip_"))
 async def toggle_vip_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2231,6 +2455,7 @@ async def toggle_vip_item(callback: CallbackQuery):
     
     await toggle_vip_list(callback)
 
+# ========== АДМИН: СПИСКИ С ПАГИНАЦИЕЙ ==========
 @dp.callback_query(lambda c: c.data.startswith("list_page_"))
 async def list_pagination(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2261,6 +2486,7 @@ async def list_pagination(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ========== АДМИН: РЕДАКТИРОВАНИЕ КЛИЕНТА ==========
 @dp.callback_query(lambda c: c.data == "edit_client_list")
 async def edit_client_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2386,6 +2612,7 @@ async def edit_client_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# ========== АДМИН: РЕДАКТИРОВАНИЕ РЕСУРСПАКА ==========
 @dp.callback_query(lambda c: c.data == "edit_pack_list")
 async def edit_pack_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2513,6 +2740,7 @@ async def edit_pack_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# ========== АДМИН: РЕДАКТИРОВАНИЕ КОНФИГА ==========
 @dp.callback_query(lambda c: c.data == "edit_config_list")
 async def edit_config_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2638,6 +2866,7 @@ async def edit_config_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# ========== АДМИН: ОБЩИЙ ОБРАБОТЧИК РЕДАКТИРОВАНИЯ ЗНАЧЕНИЙ ==========
 @dp.message(AdminStates.edit_value)
 async def edit_value(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -2660,6 +2889,7 @@ async def edit_value(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
 
+# ========== АДМИН: ОБРАБОТЧИК РЕДАКТИРОВАНИЯ МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("add_media_"))
 async def add_media_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2744,6 +2974,7 @@ async def handle_media_edit(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
 
+# ========== АДМИН: УДАЛЕНИЕ ==========
 @dp.callback_query(lambda c: c.data == "delete_client_list")
 async def delete_client_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2814,6 +3045,7 @@ async def delete_client_execute(callback: CallbackQuery):
     await callback.answer("✅ Клиент удалён!", show_alert=True)
     await delete_client_list(callback)
 
+# ========== АДМИН: ДОБАВЛЕНИЕ КЛИЕНТА ==========
 @dp.callback_query(lambda c: c.data == "add_client")
 async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2922,6 +3154,7 @@ async def client_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
+# ========== АДМИН: ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
 @dp.callback_query(lambda c: c.data == "add_pack")
 async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3038,6 +3271,7 @@ async def pack_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
+# ========== АДМИН: ДОБАВЛЕНИЕ КОНФИГА ==========
 @dp.callback_query(lambda c: c.data == "add_config")
 async def add_config_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3146,6 +3380,7 @@ async def config_media(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
+# ========== АДМИН: СПИСКИ ==========
 @dp.callback_query(lambda c: c.data == "list_clients")
 async def list_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3329,12 +3564,15 @@ async def list_configs_page(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== ИСПРАВЛЕННЫЙ КОД ДЛЯ БЭКАПОВ (BASE64) ==========
 def encode_filename(filename):
+    """Кодирует имя файла в безопасный формат для callback_data"""
     filename_bytes = filename.encode('utf-8')
     encoded = base64.b64encode(filename_bytes).decode('utf-8')
     return encoded[:50]
 
 def decode_filename(encoded):
+    """Декодирует имя файла из base64"""
     try:
         decoded_bytes = base64.b64decode(encoded)
         return decoded_bytes.decode('utf-8')
@@ -3343,6 +3581,7 @@ def decode_filename(encoded):
 
 @dp.callback_query(lambda c: c.data == "admin_zip_backups")
 async def admin_zip_backups(callback: CallbackQuery):
+    """Меню ZIP бэкапов"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3435,6 +3674,7 @@ async def create_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_") and not c.data.startswith("restore_confirm_"))
 async def restore_backup(callback: CallbackQuery):
+    """Восстановление из бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3444,16 +3684,17 @@ async def restore_backup(callback: CallbackQuery):
     
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
+        # Пробуем найти файл без учета регистра
         found = False
         for f in get_all_backups():
-            if filename in f or f in filename:
+            if f.lower() == filename.lower() or filename.lower() in f.lower():
                 filepath = BACKUP_DIR / f
                 filename = f
                 found = True
                 break
         
         if not found:
-            await callback.answer(f"❌ Файл не найден", show_alert=True)
+            await callback.answer(f"❌ Файл не найден: {filename}", show_alert=True)
             return
     
     issues = check_backup_structure(str(filepath))
@@ -3494,6 +3735,7 @@ async def restore_backup(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data.startswith("restore_confirm_"))
 async def restore_confirm(callback: CallbackQuery):
+    """Подтверждение восстановления"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3503,9 +3745,10 @@ async def restore_confirm(callback: CallbackQuery):
     
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
+        # Пробуем найти файл без учета регистра
         found = False
         for f in get_all_backups():
-            if filename in f or f in filename:
+            if f.lower() == filename.lower() or filename.lower() in f.lower():
                 filepath = BACKUP_DIR / f
                 filename = f
                 found = True
@@ -3539,6 +3782,7 @@ async def restore_confirm(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "upload_backup")
 async def upload_backup(callback: CallbackQuery, state: FSMContext):
+    """Загрузка бэкапа"""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -3552,6 +3796,7 @@ async def upload_backup(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_backup)
 async def handle_upload(message: Message, state: FSMContext):
+    """Обработка загруженного файла"""
     if message.from_user.id != ADMIN_ID:
         await state.clear()
         return
@@ -3721,6 +3966,7 @@ async def cleanup_old(callback: CallbackQuery):
     await callback.message.edit_text(f"✅ Удалено: {deleted}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_zip_backups")]]))
     await callback.answer()
 
+# ========== АДМИН: СТАТИСТИКА ==========
 @dp.callback_query(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3732,11 +3978,33 @@ async def admin_stats(callback: CallbackQuery):
     conn = sqlite3.connect(str(DB_PATH))
     cur = conn.cursor()
     clients_count = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
-    vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
+    
+    # Безопасно получаем количество VIP
+    cur.execute("PRAGMA table_info(clients)")
+    columns = [col[1] for col in cur.fetchall()]
+    if 'is_vip' in columns:
+        vip_clients = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
+    else:
+        vip_clients = 0
+        
     packs_count = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
-    vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
+    
+    cur.execute("PRAGMA table_info(resourcepacks)")
+    columns = [col[1] for col in cur.fetchall()]
+    if 'is_vip' in columns:
+        vip_packs = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
+    else:
+        vip_packs = 0
+        
     configs_count = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
-    vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
+    
+    cur.execute("PRAGMA table_info(configs)")
+    columns = [col[1] for col in cur.fetchall()]
+    if 'is_vip' in columns:
+        vip_configs = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
+    else:
+        vip_configs = 0
+    
     conn.close()
     
     await callback.message.edit_text(
@@ -3749,6 +4017,7 @@ async def admin_stats(callback: CallbackQuery):
     )
     await callback.answer()
 
+# ========== АДМИН: РАССЫЛКА ==========
 @dp.callback_query(lambda c: c.data == "admin_broadcast")
 async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3904,6 +4173,7 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# ========== МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     try:
@@ -4022,6 +4292,7 @@ async def media_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer()
 
+# ========== ЗАГЛУШКИ ==========
 @dp.callback_query(lambda c: c.data == "noop")
 async def noop(callback: CallbackQuery):
     await callback.answer()
@@ -4037,6 +4308,7 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard(is_admin, is_vip))
     await callback.answer()
 
+# ========== ЗАПУСК ==========
 async def main():
     print("="*50)
     print("✅ Бот запущен!")
@@ -4050,10 +4322,12 @@ async def main():
     print("   • 📤 Пополнение через админа")
     print("   • 👑 VIP за 49₽ навсегда")
     print("   • 🔄 Переключение VIP в админке")
+    print("   • 🔄 Автоматическое обновление структуры БД")
+    print("   • 📦 Надежные бэкапы с проверкой")
+    print("   • 🔍 Поиск файлов без учета регистра")
     print("   • 🖼️ Редактирование фото")
     print("   • 📑 Пагинация в админке")
     print("   • 📢 Рассылка")
-    print("   • 📦 Бэкапы (base64)")
     print("="*50)
     
     try:
