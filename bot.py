@@ -513,28 +513,67 @@ def get_item(table: str, item_id: int):
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
         return None
 
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ АДМИН ПАНЕЛИ ==========
 def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_filter: str = "all"):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
+        
+        # Проверяем структуру таблицы
         cur.execute(f"PRAGMA table_info({table})")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
-        if has_vip:
-            if vip_filter == "vip":
-                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
-                total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 1').fetchone()[0]
-            elif vip_filter == "regular":
-                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
-                total = cur.execute(f'SELECT COUNT(*) FROM {table} WHERE is_vip = 0').fetchone()[0]
+        
+        # Правильные запросы для каждой таблицы
+        if table == "clients":
+            if has_vip:
+                if vip_filter == "vip":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 1').fetchone()[0]
+                elif vip_filter == "regular":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM clients WHERE is_vip = 0').fetchone()[0]
+                else:
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
             else:
-                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
-                total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
-        else:
-            cur.execute(f'SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM {table} ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
-            total = cur.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+                cur.execute('SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM clients ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
+        
+        elif table == "resourcepacks":
+            if has_vip:
+                if vip_filter == "vip":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM resourcepacks WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 1').fetchone()[0]
+                elif vip_filter == "regular":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM resourcepacks WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE is_vip = 0').fetchone()[0]
+                else:
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM resourcepacks ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
+            else:
+                cur.execute('SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM resourcepacks ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks').fetchone()[0]
+        
+        elif table == "configs":
+            if has_vip:
+                if vip_filter == "vip":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM configs WHERE is_vip = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 1').fetchone()[0]
+                elif vip_filter == "regular":
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM configs WHERE is_vip = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM configs WHERE is_vip = 0').fetchone()[0]
+                else:
+                    cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM configs ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    total = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
+            else:
+                cur.execute('SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM configs ORDER BY created_at DESC LIMIT ? OFFSET ?', (per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs').fetchone()[0]
+        
         items = cur.fetchall()
+        
+        # Преобразуем downloads в числа
         converted_items = []
         for item in items:
             item_list = list(item)
@@ -544,6 +583,7 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
                 except:
                     item_list[4] = 0
             converted_items.append(tuple(item_list))
+        
         conn.close()
         return converted_items, total
     except Exception as e:
@@ -656,17 +696,10 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
         
-        # Проверяем структуру таблицы clients
-        cur.execute("PRAGMA table_info(clients)")
-        columns = [col[1] for col in cur.fetchall()]
-        logger.info(f"📋 Структура таблицы clients: {columns}")
-        
-        # Проверяем все версии в базе для отладки
         cur.execute("SELECT id, name, version FROM clients WHERE version IS NOT NULL")
         all_clients = cur.fetchall()
         logger.info(f"📋 Все клиенты в БД: {all_clients}")
         
-        # Простой запрос без лишних колонок
         cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE version = ? ORDER BY id DESC LIMIT ? OFFSET ?', 
                    (search_version, per_page, offset))
         items = cur.fetchall()
@@ -675,13 +708,11 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
         
-        # Если не нашли, пробуем найти без учета регистра
         if len(items) == 0:
             cur.execute("SELECT id, name, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
             alternative = cur.fetchall()
             if alternative:
                 logger.info(f"✅ Найдено по LOWER совпадению: {alternative}")
-                # Получаем полные данные для этих ID
                 ids = [str(a[0]) for a in alternative]
                 cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE id IN ({",".join(ids)})')
                 items = cur.fetchall()
@@ -690,7 +721,6 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         converted_items = []
         for item in items:
             item_list = list(item)
-            # Преобразуем downloads в число
             if len(item_list) > 4 and item_list[4] is not None:
                 try:
                     item_list[4] = int(item_list[4])
@@ -1130,8 +1160,7 @@ def get_admin_main_keyboard():
 def get_admin_list_keyboard(items, category, page, total_pages, action):
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version = item[:6]
-        is_vip = item[6] if len(item) > 6 else 0
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
         vip_icon = "💎 " if is_vip else ""
         buttons.append([InlineKeyboardButton(text=f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}", callback_data=f"{action}_{category}_{item_id}")])
     nav_row = []
@@ -1182,7 +1211,6 @@ async def debug_clients(message: Message):
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         
-        # Проверяем структуру таблицы
         cur.execute("PRAGMA table_info(clients)")
         columns = cur.fetchall()
         
@@ -1200,7 +1228,6 @@ async def debug_clients(message: Message):
         
         conn.close()
         
-        # Разбиваем на части если слишком длинное
         if len(text) > 4000:
             parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
             for part in parts:
@@ -1617,11 +1644,11 @@ async def info(message: Message):
         else:
             vip_configs = 0
         conn.close()
-        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 20.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
+        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 21.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 20.0")
+        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 21.0")
 
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
