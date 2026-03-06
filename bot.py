@@ -513,19 +513,16 @@ def get_item(table: str, item_id: int):
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
         return None
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ АДМИН ПАНЕЛИ ==========
 def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_filter: str = "all"):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
         offset = (page - 1) * per_page
         
-        # Проверяем структуру таблицы
         cur.execute(f"PRAGMA table_info({table})")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
         
-        # Правильные запросы для каждой таблицы
         if table == "clients":
             if has_vip:
                 if vip_filter == "vip":
@@ -573,7 +570,6 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         
         items = cur.fetchall()
         
-        # Преобразуем downloads в числа
         converted_items = []
         for item in items:
             item_list = list(item)
@@ -628,7 +624,10 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
-        media_json = json.dumps(media or [])
+        
+        if media is None:
+            media = []
+        media_json = json.dumps(media)
         
         if not version or version.strip() == "":
             version = "1.20"
@@ -652,7 +651,7 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
         
         check_item = get_item("clients", item_id)
         if check_item:
-            logger.info(f"✅ Клиент добавлен: ID={item_id}, name={name}, version='{version}'")
+            logger.info(f"✅ Клиент добавлен: ID={item_id}, name={name}, version='{version}', media={len(media)} фото")
             check_all_clients()
         else:
             logger.error(f"❌ Клиент не найден после добавления: ID={item_id}")
@@ -676,6 +675,8 @@ def update_client_media(item_id: int, media_list: list):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        if media_list is None:
+            media_list = []
         media_json = json.dumps(media_list)
         cur.execute('UPDATE clients SET media = ? WHERE id = ?', (media_json, item_id))
         conn.commit()
@@ -759,19 +760,29 @@ def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
-        media_json = json.dumps(media or [])
+        
+        if media is None:
+            media = []
+        media_json = json.dumps(media)
+        
         cur.execute("PRAGMA table_info(resourcepacks)")
         columns = [col[1] for col in cur.fetchall()]
+        
         if not version or version.strip() == "":
             version = "1.20"
         version = version.strip()
+        
         if 'is_vip' in columns:
-            cur.execute('INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, media) VALUES (?, ?, ?, ?, ?, ?, ?)', (name, full_desc, url, version, author, is_vip, media_json))
+            cur.execute('INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, media) VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, author, is_vip, media_json))
         else:
-            cur.execute('INSERT INTO resourcepacks (name, full_desc, download_url, version, author, media) VALUES (?, ?, ?, ?, ?, ?)', (name, full_desc, url, version, author, media_json))
+            cur.execute('INSERT INTO resourcepacks (name, full_desc, download_url, version, author, media) VALUES (?, ?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, author, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
+        logger.info(f"✅ Ресурспак добавлен: ID={item_id}, name={name}, version='{version}', media={len(media)} фото")
         return item_id
     except Exception as e:
         logger.error(f"Ошибка добавления ресурспака: {e}")
@@ -791,6 +802,8 @@ def update_pack_media(item_id: int, media_list: list):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        if media_list is None:
+            media_list = []
         media_json = json.dumps(media_list)
         cur.execute('UPDATE resourcepacks SET media = ? WHERE id = ?', (media_json, item_id))
         conn.commit()
@@ -862,19 +875,29 @@ def add_config(name, full_desc, url, version, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
-        media_json = json.dumps(media or [])
+        
+        if media is None:
+            media = []
+        media_json = json.dumps(media)
+        
         cur.execute("PRAGMA table_info(configs)")
         columns = [col[1] for col in cur.fetchall()]
+        
         if not version or version.strip() == "":
             version = "1.20"
         version = version.strip()
+        
         if 'is_vip' in columns:
-            cur.execute('INSERT INTO configs (name, full_desc, download_url, version, is_vip, media) VALUES (?, ?, ?, ?, ?, ?)', (name, full_desc, url, version, is_vip, media_json))
+            cur.execute('INSERT INTO configs (name, full_desc, download_url, version, is_vip, media) VALUES (?, ?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, is_vip, media_json))
         else:
-            cur.execute('INSERT INTO configs (name, full_desc, download_url, version, media) VALUES (?, ?, ?, ?, ?)', (name, full_desc, url, version, media_json))
+            cur.execute('INSERT INTO configs (name, full_desc, download_url, version, media) VALUES (?, ?, ?, ?, ?)', 
+                       (name, full_desc, url, version, media_json))
+        
         conn.commit()
         item_id = cur.lastrowid
         conn.close()
+        logger.info(f"✅ Конфиг добавлен: ID={item_id}, name={name}, version='{version}', media={len(media)} фото")
         return item_id
     except Exception as e:
         logger.error(f"Ошибка добавления конфига: {e}")
@@ -894,6 +917,8 @@ def update_config_media(item_id: int, media_list: list):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cur = conn.cursor()
+        if media_list is None:
+            media_list = []
         media_json = json.dumps(media_list)
         cur.execute('UPDATE configs SET media = ? WHERE id = ?', (media_json, item_id))
         conn.commit()
@@ -1162,12 +1187,18 @@ def get_admin_list_keyboard(items, category, page, total_pages, action):
     for item in items:
         item_id, name, full_desc, media_json, downloads, version, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        buttons.append([InlineKeyboardButton(text=f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}", callback_data=f"{action}_{category}_{item_id}")])
+        buttons.append([InlineKeyboardButton(
+            text=f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}", 
+            callback_data=f"{action}_{category}_{item_id}"
+        )])
     nav_row = []
-    if page > 1: nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"list_page_{category}_{action}_{page-1}"))
+    if page > 1: 
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"list_page_{category}_{action}_{page-1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
-    if page < total_pages: nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"list_page_{category}_{action}_{page+1}"))
-    if nav_row: buttons.append(nav_row)
+    if page < total_pages: 
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"list_page_{category}_{action}_{page+1}"))
+    if nav_row: 
+        buttons.append(nav_row)
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1202,41 +1233,18 @@ async def cmd_check_db(message: Message):
     check_all_clients()
     await message.answer("✅ Диагностика выполнена, проверь логи!")
 
-@dp.message(Command("debug_clients"))
-async def debug_clients(message: Message):
+@dp.message(Command("debug_admin"))
+async def debug_admin(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        
-        cur.execute("PRAGMA table_info(clients)")
-        columns = cur.fetchall()
-        
-        text = "📊 СТРУКТУРА ТАБЛИЦЫ CLIENTS:\n\n"
-        for col in columns:
-            text += f"• {col[1]} (тип: {col[2]})\n"
-        
-        text += "\n📋 ВСЕ КЛИЕНТЫ:\n\n"
-        cur.execute("SELECT id, name, version, download_url FROM clients ORDER BY id DESC")
-        clients = cur.fetchall()
-        
-        for client in clients:
-            text += f"ID: {client[0]}, {client[1]}, версия: '{client[2]}'\n"
-            text += f"   Ссылка: {client[3][:50]}...\n\n"
-        
-        conn.close()
-        
-        if len(text) > 4000:
-            parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
-            for part in parts:
-                await message.answer(part)
-        else:
-            await message.answer(text)
-            
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+    items, total = get_all_items_paginated("clients", 1)
+    text = f"📊 Всего клиентов: {total}\n\n"
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        text += f"ID: {item_id}, {name}, версия: {version}, загрузок: {downloads}, VIP: {is_vip}\n"
+    
+    await message.answer(text)
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -1644,11 +1652,11 @@ async def info(message: Message):
         else:
             vip_configs = 0
         conn.close()
-        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 21.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
+        text = f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 23.0\n\n📊 Статистика:\n• Пользователей: {users_count} (💎 VIP: {vip_count})\n• Клиентов: {clients_count} (💎 VIP: {vip_clients})\n• Ресурспаков: {packs_count} (💎 VIP: {vip_packs})\n• Конфигов: {configs_count} (💎 VIP: {vip_configs})"
         await message.answer(text)
     except Exception as e:
         logger.error(f"Ошибка в info: {e}")
-        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 21.0")
+        await message.answer(f"ℹ️ Информация о боте\n\nСоздатель: {CREATOR_USERNAME}\nВерсия: 23.0")
 
 @dp.message(F.text == "❓ Помощь")
 async def help_command(message: Message):
@@ -1875,13 +1883,24 @@ async def edit_client_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     items, total = get_all_items_paginated("clients", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
+    
+    logger.info(f"📋 Найдено клиентов для редактирования: {len(items)} из {total}")
+    
     if not items:
-        await callback.message.edit_text("📭 Нет клиентов для редактирования", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]]))
+        await callback.message.edit_text(
+            "📭 Нет клиентов для редактирования", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
         await callback.answer()
         return
-    await callback.message.edit_text(f"✏️ Выбери клиента для редактирования (стр 1/{total_pages}):", reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "edit"))
+    
+    await callback.message.edit_text(
+        f"✏️ Выбери клиента для редактирования (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "edit")
+    )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("edit_clients_"))
@@ -2303,6 +2322,7 @@ async def client_vip(message: Message, state: FSMContext):
 async def client_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
         version = data['client_version'].strip()
         if not version:
@@ -2316,6 +2336,7 @@ async def client_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.text and message.text.lower() == 'пропустить':
         version = data['client_version'].strip()
         if not version:
@@ -2329,6 +2350,7 @@ async def client_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
@@ -2386,6 +2408,7 @@ async def pack_vip(message: Message, state: FSMContext):
 async def pack_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
         version = data['pack_version'].strip()
         if not version:
@@ -2398,6 +2421,7 @@ async def pack_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.text and message.text.lower() == 'пропустить':
         version = data['pack_version'].strip()
         if not version:
@@ -2410,6 +2434,7 @@ async def pack_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
@@ -2461,6 +2486,7 @@ async def config_vip(message: Message, state: FSMContext):
 async def config_media(message: Message, state: FSMContext):
     data = await state.get_data()
     media_list = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
         version = data['config_version'].strip()
         if not version:
@@ -2473,6 +2499,7 @@ async def config_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении конфига", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.text and message.text.lower() == 'пропустить':
         version = data['config_version'].strip()
         if not version:
@@ -2485,6 +2512,7 @@ async def config_media(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка при добавлении конфига", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
@@ -3149,7 +3177,7 @@ async def main():
     print("   • 👑 VIP управление")
     print("   • 📦 Бэкапы")
     print("   • 📢 Рассылка")
-    print("   • 🔍 Диагностика БД (/check_db, /debug_clients)")
+    print("   • 🔍 Диагностика БД (/check_db, /debug_admin)")
     print("="*50)
     try:
         me = await bot.get_me()
