@@ -42,6 +42,7 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+# Правильный путь для bothost.ru - /app/data
 DATA_DIR = Path("/app/data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -112,8 +113,61 @@ def init_db():
         conn.commit()
         conn.close()
         print("✅ База данных клиентов готова")
+        
+        # Добавляем тестовые данные, если таблицы пустые
+        add_test_data_if_empty()
     except Exception as e:
         print(f"❌ Ошибка при создании базы клиентов: {e}")
+
+def add_test_data_if_empty():
+    """Добавляет тестовые данные, если таблицы пустые"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        # Проверяем clients
+        cur.execute("SELECT COUNT(*) FROM clients")
+        if cur.fetchone()[0] == 0:
+            print("📝 Добавляю тестовые данные в clients...")
+            cur.execute('''
+                INSERT INTO clients (name, full_desc, download_url, version, is_vip, downloads) 
+                VALUES 
+                ('Vanilla Client', 'Обычный ванильный клиент Minecraft', 'https://example.com/vanilla', '1.20.4', 0, 100),
+                ('OptiFine Client', 'Клиент с OptiFine для лучшей производительности', 'https://example.com/optifine', '1.20.4', 0, 200),
+                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50)
+            ''')
+            conn.commit()
+            print("✅ Тестовые данные добавлены в clients")
+        
+        # Проверяем resourcepacks
+        cur.execute("SELECT COUNT(*) FROM resourcepacks")
+        if cur.fetchone()[0] == 0:
+            print("📝 Добавляю тестовые данные в resourcepacks...")
+            cur.execute('''
+                INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, downloads) 
+                VALUES 
+                ('Faithful', 'Классический ресурспак в стиле vanilla', 'https://example.com/faithful', '1.20.4', 'Faithful Team', 0, 500),
+                ('VIP Texture Pack', 'Эксклюзивный ресурспак для VIP', 'https://example.com/vip', '1.20.4', 'VIP Creator', 1, 30)
+            ''')
+            conn.commit()
+            print("✅ Тестовые данные добавлены в resourcepacks")
+        
+        # Проверяем configs
+        cur.execute("SELECT COUNT(*) FROM configs")
+        if cur.fetchone()[0] == 0:
+            print("📝 Добавляю тестовые данные в configs...")
+            cur.execute('''
+                INSERT INTO configs (name, full_desc, download_url, version, is_vip, downloads) 
+                VALUES 
+                ('OptiFine Config', 'Оптимальные настройки для OptiFine', 'https://example.com/optifine-config', '1.20.4', 0, 75),
+                ('VIP Config', 'Премиум настройки для клиента', 'https://example.com/vip-config', '1.20.4', 1, 15)
+            ''')
+            conn.commit()
+            print("✅ Тестовые данные добавлены в configs")
+        
+        conn.close()
+    except Exception as e:
+        print(f"❌ Ошибка при добавлении тестовых данных: {e}")
 
 def init_users_db():
     try:
@@ -513,6 +567,7 @@ def get_item(table: str, item_id: int):
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
         return None
 
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
 def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_filter: str = "all"):
     try:
         conn = sqlite3.connect(str(DB_PATH))
@@ -523,6 +578,7 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
         
+        # Базовый SQL запрос
         if table == "clients":
             if has_vip:
                 if vip_filter == "vip":
@@ -570,6 +626,9 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         
         items = cur.fetchall()
         
+        # Логируем для отладки
+        logger.info(f"📊 {table}: найдено {len(items)} элементов из {total} (страница {page})")
+        
         converted_items = []
         for item in items:
             item_list = list(item)
@@ -585,6 +644,209 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
     except Exception as e:
         logger.error(f"Ошибка получения элементов {table}: {e}")
         return [], 0
+
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
+def get_clients_by_version(version, page=1, per_page=10, user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        offset = (page - 1) * per_page
+        is_admin = (user_id == ADMIN_ID)
+        
+        search_version = version.strip()
+        
+        logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
+        
+        # Проверяем структуру таблицы
+        cur.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        
+        if has_vip:
+            cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE version = ? ORDER BY id DESC LIMIT ? OFFSET ?', 
+                       (search_version, per_page, offset))
+        else:
+            cur.execute('SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM clients WHERE version = ? ORDER BY id DESC LIMIT ? OFFSET ?', 
+                       (search_version, per_page, offset))
+        
+        items = cur.fetchall()
+        
+        # Получаем общее количество
+        cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,))
+        total = cur.fetchone()[0]
+        
+        logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
+        
+        # Если ничего не нашли, пробуем без учета регистра
+        if len(items) == 0:
+            cur.execute("SELECT id, name, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
+            alternative = cur.fetchall()
+            if alternative:
+                logger.info(f"✅ Найдено по LOWER совпадению: {alternative}")
+                ids = [str(a[0]) for a in alternative]
+                if has_vip:
+                    cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE id IN ({",".join(ids)}) ORDER BY id DESC')
+                else:
+                    cur.execute(f'SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM clients WHERE id IN ({",".join(ids)}) ORDER BY id DESC')
+                items = cur.fetchall()
+                total = len(items)
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
+            converted_items.append(tuple(item_list))
+        
+        conn.close()
+        return converted_items, total
+    except Exception as e:
+        logger.error(f"Ошибка получения клиентов по версии {version}: {e}")
+        return [], 0
+
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
+def get_all_client_versions(user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL AND version != ""')
+        versions = []
+        for v in cur.fetchall():
+            clean_version = v[0].strip()
+            if clean_version and clean_version not in versions:
+                versions.append(clean_version)
+        
+        # Если версий нет, добавляем тестовую
+        if not versions:
+            logger.warning("⚠️ Нет версий в БД, добавляю тестовые данные")
+            cur.execute('INSERT OR IGNORE INTO clients (name, full_desc, download_url, version) VALUES (?, ?, ?, ?)',
+                       ('Тестовый клиент', 'Тестовое описание', 'https://example.com', '1.20.4'))
+            conn.commit()
+            versions = ['1.20.4']
+        else:
+            versions.sort(reverse=True)
+        
+        logger.info(f"📋 Найденные версии клиентов: {versions}")
+        conn.close()
+        return versions
+    except Exception as e:
+        logger.error(f"Ошибка получения версий клиентов: {e}")
+        return ['1.20.4']  # Возвращаем версию по умолчанию
+
+def get_packs_by_version(version, page=1, per_page=10, user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        offset = (page - 1) * per_page
+        is_admin = (user_id == ADMIN_ID)
+        cur.execute("PRAGMA table_info(resourcepacks)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        search_version = version.strip()
+        if has_vip:
+            if is_admin:
+                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
+            else:
+                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
+        else:
+            cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, 0 as is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
+        items = cur.fetchall()
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
+            if len(item_list) > 5 and item_list[5] is not None:
+                try:
+                    item_list[5] = int(item_list[5])
+                except:
+                    item_list[5] = 0
+            if len(item_list) > 6 and item_list[6] is not None:
+                try:
+                    item_list[6] = int(item_list[6])
+                except:
+                    item_list[6] = 0
+            converted_items.append(tuple(item_list))
+        conn.close()
+        return converted_items, total
+    except Exception as e:
+        logger.error(f"Ошибка получения ресурспаков по версии {version}: {e}")
+        return [], 0
+
+def get_all_pack_versions(user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT version FROM resourcepacks WHERE version IS NOT NULL AND version != "" ORDER BY version DESC')
+        versions = [v[0] for v in cur.fetchall()]
+        conn.close()
+        return versions
+    except Exception as e:
+        logger.error(f"Ошибка получения версий ресурспаков: {e}")
+        return []
+
+def get_configs_by_version(version, page=1, per_page=10, user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        offset = (page - 1) * per_page
+        is_admin = (user_id == ADMIN_ID)
+        cur.execute("PRAGMA table_info(configs)")
+        columns = [col[1] for col in cur.fetchall()]
+        has_vip = 'is_vip' in columns
+        search_version = version.strip()
+        if has_vip:
+            if is_admin:
+                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
+            else:
+                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
+        else:
+            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
+            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
+        items = cur.fetchall()
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 4 and item_list[4] is not None:
+                try:
+                    item_list[4] = int(item_list[4])
+                except:
+                    item_list[4] = 0
+            if len(item_list) > 5 and item_list[5] is not None:
+                try:
+                    item_list[5] = int(item_list[5])
+                except:
+                    item_list[5] = 0
+            converted_items.append(tuple(item_list))
+        conn.close()
+        return converted_items, total
+    except Exception as e:
+        logger.error(f"Ошибка получения конфигов по версии {version}: {e}")
+        return [], 0
+
+def get_all_config_versions(user_id=None):
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT version FROM configs WHERE version IS NOT NULL AND version != "" ORDER BY version DESC')
+        versions = [v[0] for v in cur.fetchall()]
+        conn.close()
+        return versions
+    except Exception as e:
+        logger.error(f"Ошибка получения версий конфигов: {e}")
+        return []
 
 def toggle_item_vip(table: str, item_id: int):
     try:
@@ -652,7 +914,6 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
         check_item = get_item("clients", item_id)
         if check_item:
             logger.info(f"✅ Клиент добавлен: ID={item_id}, name={name}, version='{version}', media={len(media)} фото")
-            check_all_clients()
         else:
             logger.error(f"❌ Клиент не найден после добавления: ID={item_id}")
             
@@ -685,76 +946,6 @@ def update_client_media(item_id: int, media_list: list):
     except Exception as e:
         logger.error(f"Ошибка обновления медиа клиента {item_id}: {e}")
         return False
-
-def get_clients_by_version(version, page=1, per_page=10, user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        offset = (page - 1) * per_page
-        is_admin = (user_id == ADMIN_ID)
-        
-        search_version = version.strip()
-        
-        logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
-        
-        cur.execute("SELECT id, name, version FROM clients WHERE version IS NOT NULL")
-        all_clients = cur.fetchall()
-        logger.info(f"📋 Все клиенты в БД: {all_clients}")
-        
-        cur.execute('SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE version = ? ORDER BY id DESC LIMIT ? OFFSET ?', 
-                   (search_version, per_page, offset))
-        items = cur.fetchall()
-        
-        total = cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,)).fetchone()[0]
-        
-        logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
-        
-        if len(items) == 0:
-            cur.execute("SELECT id, name, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
-            alternative = cur.fetchall()
-            if alternative:
-                logger.info(f"✅ Найдено по LOWER совпадению: {alternative}")
-                ids = [str(a[0]) for a in alternative]
-                cur.execute(f'SELECT id, name, full_desc, media, downloads, version, is_vip FROM clients WHERE id IN ({",".join(ids)})')
-                items = cur.fetchall()
-                total = len(items)
-        
-        converted_items = []
-        for item in items:
-            item_list = list(item)
-            if len(item_list) > 4 and item_list[4] is not None:
-                try:
-                    item_list[4] = int(item_list[4])
-                except:
-                    item_list[4] = 0
-            converted_items.append(tuple(item_list))
-        
-        conn.close()
-        return converted_items, total
-    except Exception as e:
-        logger.error(f"Ошибка получения клиентов по версии {version}: {e}")
-        return [], 0
-
-def get_all_client_versions(user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        
-        cur.execute('SELECT DISTINCT version FROM clients WHERE version IS NOT NULL AND version != ""')
-        versions = []
-        for v in cur.fetchall():
-            clean_version = v[0].strip()
-            if clean_version and clean_version not in versions:
-                versions.append(clean_version)
-        
-        versions.sort(reverse=True)
-        
-        logger.info(f"📋 Найденные версии клиентов (очищенные): {versions}")
-        conn.close()
-        return versions
-    except Exception as e:
-        logger.error(f"Ошибка получения версий клиентов: {e}")
-        return []
 
 def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
     try:
@@ -813,64 +1004,6 @@ def update_pack_media(item_id: int, media_list: list):
         logger.error(f"Ошибка обновления медиа ресурспака {item_id}: {e}")
         return False
 
-def get_packs_by_version(version, page=1, per_page=10, user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        offset = (page - 1) * per_page
-        is_admin = (user_id == ADMIN_ID)
-        cur.execute("PRAGMA table_info(resourcepacks)")
-        columns = [col[1] for col in cur.fetchall()]
-        has_vip = 'is_vip' in columns
-        search_version = version.strip()
-        if has_vip:
-            if is_admin:
-                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
-            else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
-        else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, likes, views, version, author, 0 as is_vip FROM resourcepacks WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM resourcepacks WHERE version = ?', (search_version,)).fetchone()[0]
-        items = cur.fetchall()
-        converted_items = []
-        for item in items:
-            item_list = list(item)
-            if len(item_list) > 4 and item_list[4] is not None:
-                try:
-                    item_list[4] = int(item_list[4])
-                except:
-                    item_list[4] = 0
-            if len(item_list) > 5 and item_list[5] is not None:
-                try:
-                    item_list[5] = int(item_list[5])
-                except:
-                    item_list[5] = 0
-            if len(item_list) > 6 and item_list[6] is not None:
-                try:
-                    item_list[6] = int(item_list[6])
-                except:
-                    item_list[6] = 0
-            converted_items.append(tuple(item_list))
-        conn.close()
-        return converted_items, total
-    except Exception as e:
-        logger.error(f"Ошибка получения ресурспаков по версии {version}: {e}")
-        return [], 0
-
-def get_all_pack_versions(user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute('SELECT DISTINCT version FROM resourcepacks WHERE version IS NOT NULL AND version != "" ORDER BY version DESC')
-        versions = [v[0] for v in cur.fetchall()]
-        conn.close()
-        return versions
-    except Exception as e:
-        logger.error(f"Ошибка получения версий ресурспаков: {e}")
-        return []
-
 def add_config(name, full_desc, url, version, is_vip=0, media=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
@@ -927,59 +1060,6 @@ def update_config_media(item_id: int, media_list: list):
     except Exception as e:
         logger.error(f"Ошибка обновления медиа конфига {item_id}: {e}")
         return False
-
-def get_configs_by_version(version, page=1, per_page=10, user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        offset = (page - 1) * per_page
-        is_admin = (user_id == ADMIN_ID)
-        cur.execute("PRAGMA table_info(configs)")
-        columns = [col[1] for col in cur.fetchall()]
-        has_vip = 'is_vip' in columns
-        search_version = version.strip()
-        if has_vip:
-            if is_admin:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
-            else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, views, version, is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-                total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
-        else:
-            cur.execute('SELECT id, name, full_desc, media, downloads, views, version, 0 as is_vip FROM configs WHERE version = ? ORDER BY downloads DESC LIMIT ? OFFSET ?', (search_version, per_page, offset))
-            total = cur.execute('SELECT COUNT(*) FROM configs WHERE version = ?', (search_version,)).fetchone()[0]
-        items = cur.fetchall()
-        converted_items = []
-        for item in items:
-            item_list = list(item)
-            if len(item_list) > 4 and item_list[4] is not None:
-                try:
-                    item_list[4] = int(item_list[4])
-                except:
-                    item_list[4] = 0
-            if len(item_list) > 5 and item_list[5] is not None:
-                try:
-                    item_list[5] = int(item_list[5])
-                except:
-                    item_list[5] = 0
-            converted_items.append(tuple(item_list))
-        conn.close()
-        return converted_items, total
-    except Exception as e:
-        logger.error(f"Ошибка получения конфигов по версии {version}: {e}")
-        return [], 0
-
-def get_all_config_versions(user_id=None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute('SELECT DISTINCT version FROM configs WHERE version IS NOT NULL AND version != "" ORDER BY version DESC')
-        versions = [v[0] for v in cur.fetchall()]
-        conn.close()
-        return versions
-    except Exception as e:
-        logger.error(f"Ошибка получения версий конфигов: {e}")
-        return []
 
 def toggle_favorite(user_id, pack_id):
     try:
@@ -3179,6 +3259,10 @@ async def main():
     print("   • 📢 Рассылка")
     print("   • 🔍 Диагностика БД (/check_db, /debug_admin)")
     print("="*50)
+    
+    # Проверяем данные при запуске
+    check_all_clients()
+    
     try:
         me = await bot.get_me()
         print(f"✅ Бот @{me.username} успешно подключен к Telegram!")
@@ -3186,6 +3270,7 @@ async def main():
         print(f"❌ Ошибка подключения к Telegram: {e}")
         print("Проверьте токен в переменных окружения на bothost.ru")
         return
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
