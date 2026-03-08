@@ -14,6 +14,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramBadRequest
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -134,7 +135,10 @@ def add_test_data_if_empty():
                 VALUES 
                 ('Vanilla Client', 'Обычный ванильный клиент Minecraft', 'https://example.com/vanilla', '1.20.4', 0, 100),
                 ('OptiFine Client', 'Клиент с OptiFine для лучшей производительности', 'https://example.com/optifine', '1.20.4', 0, 200),
-                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50)
+                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50),
+                ('Lunar Client', 'Популярный PvP клиент', 'https://example.com/lunar', '1.16.5', 0, 300),
+                ('Badlion Client', 'Клиент для PvP с античитами', 'https://example.com/badlion', '1.16.5', 0, 250),
+                ('VIP PvP Client', 'Премиум PvP клиент', 'https://example.com/vip-pvp', '1.16.5', 1, 75)
             ''')
             conn.commit()
             print("✅ Тестовые данные добавлены в clients")
@@ -567,7 +571,6 @@ def get_item(table: str, item_id: int):
         logger.error(f"Ошибка получения элемента {table} {item_id}: {e}")
         return None
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
 def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_filter: str = "all"):
     try:
         conn = sqlite3.connect(str(DB_PATH))
@@ -578,7 +581,6 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
         
-        # Базовый SQL запрос
         if table == "clients":
             if has_vip:
                 if vip_filter == "vip":
@@ -626,7 +628,6 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         
         items = cur.fetchall()
         
-        # Логируем для отладки
         logger.info(f"📊 {table}: найдено {len(items)} элементов из {total} (страница {page})")
         
         converted_items = []
@@ -645,7 +646,6 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         logger.error(f"Ошибка получения элементов {table}: {e}")
         return [], 0
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
 def get_clients_by_version(version, page=1, per_page=10, user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
@@ -657,7 +657,6 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         logger.info(f"🔍 Поиск клиентов по версии: '{search_version}'")
         
-        # Проверяем структуру таблицы
         cur.execute("PRAGMA table_info(clients)")
         columns = [col[1] for col in cur.fetchall()]
         has_vip = 'is_vip' in columns
@@ -671,13 +670,11 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         
         items = cur.fetchall()
         
-        # Получаем общее количество
         cur.execute('SELECT COUNT(*) FROM clients WHERE version = ?', (search_version,))
         total = cur.fetchone()[0]
         
         logger.info(f"📊 Найдено клиентов: {len(items)} из {total}")
         
-        # Если ничего не нашли, пробуем без учета регистра
         if len(items) == 0:
             cur.execute("SELECT id, name, version FROM clients WHERE LOWER(version) = LOWER(?)", (search_version,))
             alternative = cur.fetchall()
@@ -707,7 +704,6 @@ def get_clients_by_version(version, page=1, per_page=10, user_id=None):
         logger.error(f"Ошибка получения клиентов по версии {version}: {e}")
         return [], 0
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ==========
 def get_all_client_versions(user_id=None):
     try:
         conn = sqlite3.connect(str(DB_PATH))
@@ -720,7 +716,6 @@ def get_all_client_versions(user_id=None):
             if clean_version and clean_version not in versions:
                 versions.append(clean_version)
         
-        # Если версий нет, добавляем тестовую
         if not versions:
             logger.warning("⚠️ Нет версий в БД, добавляю тестовые данные")
             cur.execute('INSERT OR IGNORE INTO clients (name, full_desc, download_url, version) VALUES (?, ?, ?, ?)',
@@ -735,7 +730,7 @@ def get_all_client_versions(user_id=None):
         return versions
     except Exception as e:
         logger.error(f"Ошибка получения версий клиентов: {e}")
-        return ['1.20.4']  # Возвращаем версию по умолчанию
+        return ['1.20.4']
 
 def get_packs_by_version(version, page=1, per_page=10, user_id=None):
     try:
@@ -929,8 +924,10 @@ def update_client(item_id, field, value):
         cur.execute(f'UPDATE clients SET {field} = ? WHERE id = ?', (value, item_id))
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         logger.error(f"Ошибка обновления клиента {item_id}: {e}")
+        return False
 
 def update_client_media(item_id: int, media_list: list):
     try:
@@ -986,8 +983,10 @@ def update_pack(item_id, field, value):
         cur.execute(f'UPDATE resourcepacks SET {field} = ? WHERE id = ?', (value, item_id))
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         logger.error(f"Ошибка обновления ресурспака {item_id}: {e}")
+        return False
 
 def update_pack_media(item_id: int, media_list: list):
     try:
@@ -1043,8 +1042,10 @@ def update_config(item_id, field, value):
         cur.execute(f'UPDATE configs SET {field} = ? WHERE id = ?', (value, item_id))
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         logger.error(f"Ошибка обновления конфига {item_id}: {e}")
+        return False
 
 def update_config_media(item_id: int, media_list: list):
     try:
@@ -1263,24 +1264,64 @@ def get_admin_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_admin_list_keyboard(items, category, page, total_pages, action):
+    """Создает клавиатуру со списком элементов для админки"""
     buttons = []
     for item in items:
         item_id, name, full_desc, media_json, downloads, version, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        buttons.append([InlineKeyboardButton(
-            text=f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}", 
-            callback_data=f"{action}_{category}_{item_id}"
-        )])
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"{action}_{category}_{item_id}")])
+    
+    # Навигация по страницам
     nav_row = []
-    if page > 1: 
+    if page > 1:
         nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"list_page_{category}_{action}_{page-1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
-    if page < total_pages: 
+    if page < total_pages:
         nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"list_page_{category}_{action}_{page+1}"))
-    if nav_row: 
+    if nav_row:
         buttons.append(nav_row)
+    
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
+    """Создает клавиатуру для редактирования элемента"""
+    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
+    
+    if category == "clients":
+        fields = [
+            [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_field_{category}_name_{item_id}")],
+            [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_field_{category}_full_desc_{item_id}")],
+            [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_field_{category}_version_{item_id}")],
+            [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
+            [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_list")]
+        ]
+    elif category == "packs":
+        fields = [
+            [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_field_{category}_name_{item_id}")],
+            [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_field_{category}_full_desc_{item_id}")],
+            [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_field_{category}_version_{item_id}")],
+            [InlineKeyboardButton(text="✍️ Автор", callback_data=f"edit_field_{category}_author_{item_id}")],
+            [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
+            [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_list")]
+        ]
+    else:  # configs
+        fields = [
+            [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_field_{category}_name_{item_id}")],
+            [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_field_{category}_full_desc_{item_id}")],
+            [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_field_{category}_version_{item_id}")],
+            [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
+            [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_list")]
+        ]
+    
+    return InlineKeyboardMarkup(inline_keyboard=fields)
 
 def get_edit_media_keyboard(category, item_id):
     buttons = [
@@ -1605,16 +1646,22 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
+# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ back_to_list ==========
 @dp.callback_query(lambda c: c.data.startswith("back_"))
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     category = callback.data.replace("back_", "")
     data = await state.get_data()
     user_id = callback.from_user.id
+    
     if category == "clients":
         version = data.get("client_version", "1.20")
         items, total = get_clients_by_version(version, 1, user_id=user_id)
         if total == 0:
-            await callback.message.edit_text(f"🎮 Нет клиентов для версии {version}")
+            try:
+                await callback.message.edit_text(f"🎮 Нет клиентов для версии {version}")
+            except TelegramBadRequest:
+                await callback.message.delete()
+                await callback.message.answer(f"🎮 Нет клиентов для версии {version}")
             await callback.answer()
             return
         title = f"🎮 Клиенты для версии {version}"
@@ -1623,7 +1670,11 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         version = data.get("pack_version", "1.20")
         items, total = get_packs_by_version(version, 1, user_id=user_id)
         if total == 0:
-            await callback.message.edit_text(f"🎨 Нет ресурспаков для версии {version}")
+            try:
+                await callback.message.edit_text(f"🎨 Нет ресурспаков для версии {version}")
+            except TelegramBadRequest:
+                await callback.message.delete()
+                await callback.message.answer(f"🎨 Нет ресурспаков для версии {version}")
             await callback.answer()
             return
         title = f"🎨 Ресурспаки для версии {version}"
@@ -1632,13 +1683,41 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         version = data.get("config_version", "1.20")
         items, total = get_configs_by_version(version, 1, user_id=user_id)
         if total == 0:
-            await callback.message.edit_text(f"⚙️ Нет конфигов для версии {version}")
+            try:
+                await callback.message.edit_text(f"⚙️ Нет конфигов для версии {version}")
+            except TelegramBadRequest:
+                await callback.message.delete()
+                await callback.message.answer(f"⚙️ Нет конфигов для версии {version}")
             await callback.answer()
             return
         title = f"⚙️ Конфиги для версии {version}"
         page = 1
+    
     total_pages = max(1, (total + 9) // 10)
-    await callback.message.edit_text(f"{title} (стр {page}/{total_pages}):", reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True))
+    await state.update_data({f"{category}_page": page})
+    
+    try:
+        # Пробуем отредактировать текущее сообщение
+        await callback.message.edit_text(
+            f"{title} (стр {page}/{total_pages}):", 
+            reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True)
+        )
+    except TelegramBadRequest as e:
+        if "there is no text in the message to edit" in str(e):
+            # Если текущее сообщение - фото без текста, удаляем его и отправляем новое
+            await callback.message.delete()
+            await callback.message.answer(
+                f"{title} (стр {page}/{total_pages}):", 
+                reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True)
+            )
+        else:
+            # Другая ошибка - логируем и отправляем новое сообщение
+            logger.error(f"Ошибка при возврате к списку: {e}")
+            await callback.message.answer(
+                f"{title} (стр {page}/{total_pages}):", 
+                reply_markup=get_items_keyboard(items, category, page, total_pages, show_vip=True)
+            )
+    
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("download_"))
@@ -1859,8 +1938,8 @@ async def admin_clients(callback: CallbackQuery):
         return
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить клиента", callback_data="add_client")],
-        [InlineKeyboardButton(text="✏️ Редактировать клиента", callback_data="edit_client_list")],
-        [InlineKeyboardButton(text="🗑 Удалить клиента", callback_data="delete_client_list")],
+        [InlineKeyboardButton(text="✏️ Редактировать клиента", callback_data="edit_clients_list")],
+        [InlineKeyboardButton(text="🗑 Удалить клиента", callback_data="delete_clients_list")],
         [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_clients")],
         [InlineKeyboardButton(text="📋 Список клиентов", callback_data="list_clients")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
@@ -1875,8 +1954,8 @@ async def admin_packs(callback: CallbackQuery):
         return
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить ресурспак", callback_data="add_pack")],
-        [InlineKeyboardButton(text="✏️ Редактировать ресурспак", callback_data="edit_pack_list")],
-        [InlineKeyboardButton(text="🗑 Удалить ресурспак", callback_data="delete_pack_list")],
+        [InlineKeyboardButton(text="✏️ Редактировать ресурспак", callback_data="edit_packs_list")],
+        [InlineKeyboardButton(text="🗑 Удалить ресурспак", callback_data="delete_packs_list")],
         [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_packs")],
         [InlineKeyboardButton(text="📋 Список ресурспаков", callback_data="list_packs")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
@@ -1891,8 +1970,8 @@ async def admin_configs(callback: CallbackQuery):
         return
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить конфиг", callback_data="add_config")],
-        [InlineKeyboardButton(text="✏️ Редактировать конфиг", callback_data="edit_config_list")],
-        [InlineKeyboardButton(text="🗑 Удалить конфиг", callback_data="delete_config_list")],
+        [InlineKeyboardButton(text="✏️ Редактировать конфиг", callback_data="edit_configs_list")],
+        [InlineKeyboardButton(text="🗑 Удалить конфиг", callback_data="delete_configs_list")],
         [InlineKeyboardButton(text="💎 Переключить VIP", callback_data="toggle_vip_configs")],
         [InlineKeyboardButton(text="📋 Список конфигов", callback_data="list_configs")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
@@ -1900,66 +1979,9 @@ async def admin_configs(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ Управление конфигами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("toggle_vip_"))
-async def toggle_vip_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    category = callback.data.replace("toggle_vip_", "")
-    table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
-    table = table_map.get(category)
-    items, total = get_all_items_paginated(table, 1, vip_filter="all")
-    if not items:
-        await callback.message.edit_text(f"📭 Нет элементов в категории {category}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]]))
-        await callback.answer()
-        return
-    buttons = []
-    for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
-        status = "💎 VIP" if is_vip else "🔘 Обычный"
-        buttons.append([InlineKeyboardButton(text=f"{item_id}. {name[:30]} ({version}) - {status}", callback_data=f"toggle_vip_{category}_{item_id}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
-    await callback.message.edit_text(f"💎 Переключение VIP статуса для {category}\n\nВыбери элемент:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("toggle_vip_") and len(c.data.split("_")) >= 4)
-async def toggle_vip_item(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    parts = callback.data.split("_")
-    category = parts[2]
-    item_id = int(parts[3])
-    table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
-    table = table_map.get(category)
-    new_status = toggle_item_vip(table, item_id)
-    if new_status:
-        await callback.answer("✅ Элемент теперь VIP!", show_alert=True)
-    else:
-        await callback.answer("✅ Элемент теперь обычный!", show_alert=True)
-    await toggle_vip_list(callback)
-
-@dp.callback_query(lambda c: c.data.startswith("list_page_"))
-async def list_pagination(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    parts = callback.data.split("_")
-    category = parts[2]
-    action = parts[3]
-    page = int(parts[4])
-    table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
-    table = table_map.get(category)
-    if not table:
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-    items, total = get_all_items_paginated(table, page, vip_filter="all")
-    total_pages = max(1, (total + 9) // 10)
-    await callback.message.edit_text(f"📋 Страница {page}/{total_pages}:", reply_markup=get_admin_list_keyboard(items, category, page, total_pages, action))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "edit_client_list")
-async def edit_client_list(callback: CallbackQuery):
+# ========== РЕДАКТИРОВАНИЕ КЛИЕНТОВ ==========
+@dp.callback_query(lambda c: c.data == "edit_clients_list")
+async def edit_clients_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
@@ -1979,259 +2001,180 @@ async def edit_client_list(callback: CallbackQuery):
     
     await callback.message.edit_text(
         f"✏️ Выбери клиента для редактирования (стр 1/{total_pages}):",
-        reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "edit")
+        reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "edit_item")
     )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_clients_"))
+@dp.callback_query(lambda c: c.data.startswith("edit_item_clients_"))
 async def edit_client_select(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     try:
-        item_id = int(callback.data.replace("edit_clients_", ""))
+        item_id = int(callback.data.replace("edit_item_clients_", ""))
     except ValueError:
         await callback.answer("❌ Неверный ID", show_alert=True)
         return
+    
     item = get_item("clients", item_id)
     if not item:
         await callback.answer("❌ Клиент не найден", show_alert=True)
         return
+    
     try:
-        media_list = json.loads(item[4]) if item[4] else []
+        media_list = json.loads(item[3]) if item[3] else []
         media_count = len(media_list)
     except:
         media_count = 0
+    
     is_vip = item[6] == 1 if len(item) > 6 else 0
-    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
-    fields = [
-        [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_client_field_name_{item_id}")],
-        [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_client_field_full_desc_{item_id}")],
-        [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_client_field_version_{item_id}")],
-        [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_client_field_download_url_{item_id}")],
-        [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_client_media_{item_id}")],
-        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_clients_{item_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_client_list")]
-    ]
-    await callback.message.edit_text(f"✏️ Редактирование: {item[1]}\n\nЧто изменить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=fields))
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование: {item[1]}\n\nЧто изменить?",
+        reply_markup=get_edit_item_keyboard("clients", item_id, media_count, is_vip)
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_client_field_"))
-async def edit_client_field(callback: CallbackQuery, state: FSMContext):
+# ========== РЕДАКТИРОВАНИЕ РЕСУРСПАКОВ ==========
+@dp.callback_query(lambda c: c.data == "edit_packs_list")
+async def edit_packs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    parts = callback.data.split("_")
-    field = parts[3]
-    item_id = int(parts[4])
-    field_map = {'name': 'name', 'full_desc': 'full_desc', 'version': 'version', 'download_url': 'download_url'}
-    db_field = field_map.get(field)
-    if not db_field:
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category="clients")
-    await state.set_state(AdminStates.edit_value)
-    await callback.message.edit_text("✏️ Введи новое значение:")
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("edit_client_media_"))
-async def edit_client_media(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    item_id = int(callback.data.replace("edit_client_media_", ""))
-    item = get_item("clients", item_id)
-    if not item:
-        await callback.answer("❌ Клиент не найден", show_alert=True)
-        return
-    try:
-        media_list = json.loads(item[4]) if item[4] else []
-    except:
-        media_list = []
-    await state.update_data(edit_item_id=item_id, edit_category="clients", media_list=media_list)
-    await state.set_state(AdminStates.edit_media)
-    media_count = len(media_list)
-    text = f"🖼️ Управление фото для {item[1]}\n\nСейчас фото: {media_count}\n\n"
-    if media_count > 0:
-        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
-    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard("clients", item_id))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "edit_pack_list")
-async def edit_pack_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
+    
     items, total = get_all_items_paginated("resourcepacks", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
+    
     if not items:
-        await callback.message.edit_text("📭 Нет ресурспаков для редактирования", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]]))
+        await callback.message.edit_text(
+            "📭 Нет ресурспаков для редактирования", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
         await callback.answer()
         return
-    await callback.message.edit_text(f"✏️ Выбери ресурспак для редактирования (стр 1/{total_pages}):", reply_markup=get_admin_list_keyboard(items, "packs", 1, total_pages, "edit"))
+    
+    await callback.message.edit_text(
+        f"✏️ Выбери ресурспак для редактирования (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "packs", 1, total_pages, "edit_item")
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_packs_"))
+@dp.callback_query(lambda c: c.data.startswith("edit_item_packs_"))
 async def edit_pack_select(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     try:
-        item_id = int(callback.data.replace("edit_packs_", ""))
+        item_id = int(callback.data.replace("edit_item_packs_", ""))
     except ValueError:
         await callback.answer("❌ Неверный ID", show_alert=True)
         return
+    
     item = get_item("resourcepacks", item_id)
     if not item:
         await callback.answer("❌ Ресурспак не найден", show_alert=True)
         return
+    
     try:
-        media_list = json.loads(item[4]) if item[4] else []
+        media_list = json.loads(item[3]) if item[3] else []
         media_count = len(media_list)
     except:
         media_count = 0
+    
     is_vip = item[7] == 1 if len(item) > 7 else 0
-    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
-    fields = [
-        [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_pack_field_name_{item_id}")],
-        [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_pack_field_full_desc_{item_id}")],
-        [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_pack_field_version_{item_id}")],
-        [InlineKeyboardButton(text="✍️ Автор", callback_data=f"edit_pack_field_author_{item_id}")],
-        [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_pack_field_download_url_{item_id}")],
-        [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_pack_media_{item_id}")],
-        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_packs_{item_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_pack_list")]
-    ]
-    await callback.message.edit_text(f"✏️ Редактирование: {item[1]}\n\nЧто изменить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=fields))
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование: {item[1]}\n\nЧто изменить?",
+        reply_markup=get_edit_item_keyboard("packs", item_id, media_count, is_vip)
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_pack_field_"))
-async def edit_pack_field(callback: CallbackQuery, state: FSMContext):
+# ========== РЕДАКТИРОВАНИЕ КОНФИГОВ ==========
+@dp.callback_query(lambda c: c.data == "edit_configs_list")
+async def edit_configs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    parts = callback.data.split("_")
-    field = parts[3]
-    item_id = int(parts[4])
-    field_map = {'name': 'name', 'full_desc': 'full_desc', 'version': 'version', 'author': 'author', 'download_url': 'download_url'}
-    db_field = field_map.get(field)
-    if not db_field:
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category="resourcepacks")
-    await state.set_state(AdminStates.edit_value)
-    await callback.message.edit_text("✏️ Введи новое значение:")
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("edit_pack_media_"))
-async def edit_pack_media(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    item_id = int(callback.data.replace("edit_pack_media_", ""))
-    item = get_item("resourcepacks", item_id)
-    if not item:
-        await callback.answer("❌ Ресурспак не найден", show_alert=True)
-        return
-    try:
-        media_list = json.loads(item[4]) if item[4] else []
-    except:
-        media_list = []
-    await state.update_data(edit_item_id=item_id, edit_category="resourcepacks", media_list=media_list)
-    await state.set_state(AdminStates.edit_media)
-    media_count = len(media_list)
-    text = f"🖼️ Управление фото для {item[1]}\n\nСейчас фото: {media_count}\n\n"
-    if media_count > 0:
-        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
-    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard("packs", item_id))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "edit_config_list")
-async def edit_config_list(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
+    
     items, total = get_all_items_paginated("configs", 1, vip_filter="all")
     total_pages = max(1, (total + 9) // 10)
+    
     if not items:
-        await callback.message.edit_text("📭 Нет конфигов для редактирования", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]]))
+        await callback.message.edit_text(
+            "📭 Нет конфигов для редактирования", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
+        )
         await callback.answer()
         return
-    await callback.message.edit_text(f"✏️ Выбери конфиг для редактирования (стр 1/{total_pages}):", reply_markup=get_admin_list_keyboard(items, "configs", 1, total_pages, "edit"))
+    
+    await callback.message.edit_text(
+        f"✏️ Выбери конфиг для редактирования (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "configs", 1, total_pages, "edit_item")
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_configs_"))
+@dp.callback_query(lambda c: c.data.startswith("edit_item_configs_"))
 async def edit_config_select(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     try:
-        item_id = int(callback.data.replace("edit_configs_", ""))
+        item_id = int(callback.data.replace("edit_item_configs_", ""))
     except ValueError:
         await callback.answer("❌ Неверный ID", show_alert=True)
         return
+    
     item = get_item("configs", item_id)
     if not item:
         await callback.answer("❌ Конфиг не найден", show_alert=True)
         return
+    
     try:
-        media_list = json.loads(item[4]) if item[4] else []
+        media_list = json.loads(item[3]) if item[3] else []
         media_count = len(media_list)
     except:
         media_count = 0
+    
     is_vip = item[6] == 1 if len(item) > 6 else 0
-    vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
-    fields = [
-        [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_config_field_name_{item_id}")],
-        [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_config_field_full_desc_{item_id}")],
-        [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_config_field_version_{item_id}")],
-        [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_config_field_download_url_{item_id}")],
-        [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_config_media_{item_id}")],
-        [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_configs_{item_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="edit_config_list")]
-    ]
-    await callback.message.edit_text(f"✏️ Редактирование: {item[1]}\n\nЧто изменить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=fields))
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование: {item[1]}\n\nЧто изменить?",
+        reply_markup=get_edit_item_keyboard("configs", item_id, media_count, is_vip)
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_config_field_"))
-async def edit_config_field(callback: CallbackQuery, state: FSMContext):
+# ========== ОБРАБОТКА РЕДАКТИРОВАНИЯ ПОЛЕЙ ==========
+@dp.callback_query(lambda c: c.data.startswith("edit_field_"))
+async def edit_field_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     parts = callback.data.split("_")
+    category = parts[2]
     field = parts[3]
     item_id = int(parts[4])
-    field_map = {'name': 'name', 'full_desc': 'full_desc', 'version': 'version', 'download_url': 'download_url'}
+    
+    field_map = {
+        'name': 'name',
+        'full_desc': 'full_desc',
+        'version': 'version',
+        'author': 'author',
+        'download_url': 'download_url'
+    }
+    
     db_field = field_map.get(field)
     if not db_field:
         await callback.answer("❌ Ошибка", show_alert=True)
         return
-    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category="configs")
+    
+    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category=category)
     await state.set_state(AdminStates.edit_value)
-    await callback.message.edit_text("✏️ Введи новое значение:")
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("edit_config_media_"))
-async def edit_config_media(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    item_id = int(callback.data.replace("edit_config_media_", ""))
-    item = get_item("configs", item_id)
-    if not item:
-        await callback.answer("❌ Конфиг не найден", show_alert=True)
-        return
-    try:
-        media_list = json.loads(item[4]) if item[4] else []
-    except:
-        media_list = []
-    await state.update_data(edit_item_id=item_id, edit_category="configs", media_list=media_list)
-    await state.set_state(AdminStates.edit_media)
-    media_count = len(media_list)
-    text = f"🖼️ Управление фото для {item[1]}\n\nСейчас фото: {media_count}\n\n"
-    if media_count > 0:
-        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
-    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard("configs", item_id))
+    
+    await callback.message.edit_text(f"✏️ Введи новое значение для поля {field}:")
     await callback.answer()
 
 @dp.message(AdminStates.edit_value)
@@ -2239,28 +2182,70 @@ async def edit_value(message: Message, state: FSMContext):
     data = await state.get_data()
     item_id = data.get('edit_item_id')
     field = data.get('edit_field')
-    category = data.get('edit_category', 'clients')
-    if not item_id or not field:
+    category = data.get('edit_category')
+    
+    if not item_id or not field or not category:
         await message.answer("❌ Ошибка: нет данных для редактирования")
         await state.clear()
         return
-    if category == 'resourcepacks':
-        update_pack(item_id, field, message.text)
+    
+    success = False
+    if category == 'clients':
+        success = update_client(item_id, field, message.text)
+    elif category == 'packs':
+        success = update_pack(item_id, field, message.text)
     elif category == 'configs':
-        update_config(item_id, field, message.text)
-    else:
-        update_client(item_id, field, message.text)
+        success = update_config(item_id, field, message.text)
+    
     await state.clear()
-    await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
+    
+    if success:
+        await message.answer("✅ Значение обновлено!", reply_markup=get_main_keyboard(is_admin=True))
+    else:
+        await message.answer("❌ Ошибка при обновлении", reply_markup=get_main_keyboard(is_admin=True))
+
+# ========== РЕДАКТИРОВАНИЕ МЕДИА ==========
+@dp.callback_query(lambda c: c.data.startswith("edit_media_"))
+async def edit_media_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    item_id = int(parts[3])
+    
+    item = get_item(category, item_id)
+    if not item:
+        await callback.answer("❌ Элемент не найден", show_alert=True)
+        return
+    
+    try:
+        media_list = json.loads(item[3]) if item[3] else []
+    except:
+        media_list = []
+    
+    await state.update_data(edit_item_id=item_id, edit_category=category, media_list=media_list)
+    await state.set_state(AdminStates.edit_media)
+    
+    media_count = len(media_list)
+    text = f"🖼️ Управление фото для {item[1]}\n\nСейчас фото: {media_count}\n\n"
+    if media_count > 0:
+        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
+    
+    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard(category, item_id))
+    await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("add_media_"))
 async def add_media_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     parts = callback.data.split("_")
     category = parts[2]
     item_id = int(parts[3])
+    
     await state.update_data(edit_item_id=item_id, edit_category=category)
     await callback.message.edit_text("📸 Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'отмена' чтобы выйти")
     await callback.answer()
@@ -2270,16 +2255,23 @@ async def delete_media(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     parts = callback.data.split("_")
     category = parts[2]
     item_id = int(parts[3])
+    
+    success = False
     if category == "clients":
-        update_client_media(item_id, [])
+        success = update_client_media(item_id, [])
     elif category == "packs":
-        update_pack_media(item_id, [])
+        success = update_pack_media(item_id, [])
     else:
-        update_config_media(item_id, [])
-    await callback.message.edit_text("✅ Все фото удалены!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_{item_id}")]]))
+        success = update_config_media(item_id, [])
+    
+    if success:
+        await callback.message.edit_text("✅ Все фото удалены!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
+    else:
+        await callback.message.edit_text("❌ Ошибка при удалении фото", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
     await callback.answer()
 
 @dp.message(AdminStates.edit_media)
@@ -2287,24 +2279,33 @@ async def handle_media_edit(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         await state.clear()
         return
+    
     data = await state.get_data()
     item_id = data.get('edit_item_id')
     category = data.get('edit_category')
     current_media = data.get('media_list', [])
+    
     if message.text and message.text.lower() == 'готово':
+        success = False
         if category == 'clients':
-            update_client_media(item_id, current_media)
-        elif category == 'resourcepacks':
-            update_pack_media(item_id, current_media)
+            success = update_client_media(item_id, current_media)
+        elif category == 'packs':
+            success = update_pack_media(item_id, current_media)
         else:
-            update_config_media(item_id, current_media)
+            success = update_config_media(item_id, current_media)
+        
         await state.clear()
-        await message.answer(f"✅ Фото сохранено! Всего: {len(current_media)}", reply_markup=get_main_keyboard(is_admin=True))
+        if success:
+            await message.answer(f"✅ Фото сохранено! Всего: {len(current_media)}", reply_markup=get_main_keyboard(is_admin=True))
+        else:
+            await message.answer("❌ Ошибка при сохранении фото", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.text and message.text.lower() == 'отмена':
         await state.clear()
         await message.answer("❌ Редактирование отменено", reply_markup=get_main_keyboard(is_admin=True))
         return
+    
     if message.photo:
         current_media.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=current_media)
@@ -2312,52 +2313,341 @@ async def handle_media_edit(message: Message, state: FSMContext):
     else:
         await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
 
-@dp.callback_query(lambda c: c.data == "delete_client_list")
-async def delete_client_list(callback: CallbackQuery):
+# ========== ПЕРЕКЛЮЧЕНИЕ VIP СТАТУСА ==========
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_"))
+async def toggle_vip_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-    items, total = get_all_items_paginated("clients", 1, vip_filter="all")
-    total_pages = max(1, (total + 9) // 10)
-    if not items:
-        await callback.message.edit_text("📭 Нет клиентов для удаления", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]]))
-        await callback.answer()
-        return
-    await callback.message.edit_text(f"🗑 Выбери клиента для удаления (стр 1/{total_pages}):", reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "delete"))
+    
+    parts = callback.data.split("_")
+    if len(parts) == 3:
+        # Это запрос на показ списка
+        category = parts[2]
+        table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
+        table = table_map.get(category)
+        
+        items, total = get_all_items_paginated(table, 1, vip_filter="all")
+        total_pages = max(1, (total + 9) // 10)
+        
+        if not items:
+            await callback.message.edit_text(
+                f"📭 Нет элементов в категории {category}", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]])
+            )
+            await callback.answer()
+            return
+        
+        buttons = []
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
+            status = "💎 VIP" if is_vip else "🔘 Обычный"
+            button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_{category}_{item_id}")])
+        
+        # Навигация
+        nav_row = []
+        if total_pages > 1:
+            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_page_{category}_2"))
+        if nav_row:
+            buttons.append(nav_row)
+        
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
+        
+        await callback.message.edit_text(
+            f"💎 Переключение VIP статуса для {category}\n\nВыбери элемент:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    
+    elif len(parts) >= 4:
+        # Это переключение конкретного элемента
+        category = parts[2]
+        item_id = int(parts[3])
+        table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
+        table = table_map.get(category)
+        
+        new_status = toggle_item_vip(table, item_id)
+        
+        if new_status:
+            await callback.answer("✅ Элемент теперь VIP!", show_alert=True)
+        else:
+            await callback.answer("✅ Элемент теперь обычный!", show_alert=True)
+        
+        # Возвращаемся к списку
+        await toggle_vip_list(callback)
+    
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("delete_clients_") and not c.data.startswith("delete_clients_confirm_"))
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_page_"))
+async def toggle_vip_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[3]
+    page = int(parts[4])
+    
+    table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
+    table = table_map.get(category)
+    
+    items, total = get_all_items_paginated(table, page, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    if not items:
+        await callback.message.edit_text(
+            f"📭 Нет элементов в категории {category}", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        status = "💎 VIP" if is_vip else "🔘 Обычный"
+        button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_{category}_{item_id}")])
+    
+    # Навигация
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"toggle_vip_page_{category}_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_page_{category}_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
+    
+    await callback.message.edit_text(
+        f"💎 Переключение VIP статуса для {category}\n\nВыбери элемент:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    
+    await callback.answer()
+
+# ========== УДАЛЕНИЕ ЭЛЕМЕНТОВ ==========
+@dp.callback_query(lambda c: c.data == "delete_clients_list")
+async def delete_clients_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items, total = get_all_items_paginated("clients", 1, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет клиентов для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери клиента для удаления (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "clients", 1, total_pages, "delete_item")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_clients_") and not c.data.startswith("delete_item_clients_confirm_"))
 async def delete_client_confirm(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     try:
-        item_id = int(callback.data.replace("delete_clients_", ""))
+        item_id = int(callback.data.replace("delete_item_clients_", ""))
     except ValueError:
         await callback.answer("❌ Неверный ID", show_alert=True)
         return
+    
     item = get_item("clients", item_id)
     if not item:
         await callback.answer("❌ Клиент не найден", show_alert=True)
         return
-    buttons = [[InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_clients_confirm_{item_id}")], [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_client_list")]]
-    await callback.message.edit_text(f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить клиента:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_clients_confirm_{item_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_clients_list")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить клиента:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("delete_clients_confirm_"))
+@dp.callback_query(lambda c: c.data.startswith("delete_item_clients_confirm_"))
 async def delete_client_execute(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
     try:
-        item_id = int(callback.data.replace("delete_clients_confirm_", ""))
+        item_id = int(callback.data.replace("delete_item_clients_confirm_", ""))
     except ValueError:
         await callback.answer("❌ Неверный ID", show_alert=True)
         return
-    delete_item("clients", item_id)
-    await callback.answer("✅ Клиент удалён!", show_alert=True)
-    await delete_client_list(callback)
+    
+    success = delete_item("clients", item_id)
+    
+    if success:
+        await callback.answer("✅ Клиент удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении!", show_alert=True)
+    
+    await delete_clients_list(callback)
 
+# Удаление ресурспаков
+@dp.callback_query(lambda c: c.data == "delete_packs_list")
+async def delete_packs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items, total = get_all_items_paginated("resourcepacks", 1, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет ресурспаков для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери ресурспак для удаления (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "packs", 1, total_pages, "delete_item")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_packs_") and not c.data.startswith("delete_item_packs_confirm_"))
+async def delete_pack_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_packs_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("resourcepacks", item_id)
+    if not item:
+        await callback.answer("❌ Ресурспак не найден", show_alert=True)
+        return
+    
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_packs_confirm_{item_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_packs_list")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить ресурспак:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_packs_confirm_"))
+async def delete_pack_execute(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_packs_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    success = delete_item("resourcepacks", item_id)
+    
+    if success:
+        await callback.answer("✅ Ресурспак удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении!", show_alert=True)
+    
+    await delete_packs_list(callback)
+
+# Удаление конфигов
+@dp.callback_query(lambda c: c.data == "delete_configs_list")
+async def delete_configs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    items, total = get_all_items_paginated("configs", 1, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет конфигов для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
+        )
+        await callback.answer()
+        return
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери конфиг для удаления (стр 1/{total_pages}):",
+        reply_markup=get_admin_list_keyboard(items, "configs", 1, total_pages, "delete_item")
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_configs_") and not c.data.startswith("delete_item_configs_confirm_"))
+async def delete_config_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_configs_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("configs", item_id)
+    if not item:
+        await callback.answer("❌ Конфиг не найден", show_alert=True)
+        return
+    
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_configs_confirm_{item_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_configs_list")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить конфиг:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_configs_confirm_"))
+async def delete_config_execute(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_configs_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    success = delete_item("configs", item_id)
+    
+    if success:
+        await callback.answer("✅ Конфиг удалён!", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении!", show_alert=True)
+    
+    await delete_configs_list(callback)
+
+# ========== ОСТАЛЬНЫЕ ФУНКЦИИ (ДОБАВЛЕНИЕ, СПИСКИ, БЭКАПЫ, РАССЫЛКА) ==========
 @dp.callback_query(lambda c: c.data == "add_client")
 async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2753,6 +3043,35 @@ async def list_configs_page(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
+# ========== ФУНКЦИИ ДЛЯ ПАГИНАЦИИ В АДМИНКЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("list_page_"))
+async def list_page_pagination(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    action = parts[3]
+    page = int(parts[4])
+    
+    table_map = {'clients': 'clients', 'packs': 'resourcepacks', 'configs': 'configs'}
+    table = table_map.get(category)
+    
+    if not table:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    
+    items, total = get_all_items_paginated(table, page, vip_filter="all")
+    total_pages = max(1, (total + 9) // 10)
+    
+    await callback.message.edit_text(
+        f"📋 Страница {page}/{total_pages}:",
+        reply_markup=get_admin_list_keyboard(items, category, page, total_pages, action)
+    )
+    await callback.answer()
+
+# ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
 def encode_filename(filename):
     filename_bytes = filename.encode('utf-8')
     encoded = base64.b64encode(filename_bytes).decode('utf-8')
@@ -3148,6 +3467,7 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await callback.message.answer("❌ Рассылка отменена", reply_markup=get_main_keyboard(is_admin=True))
 
+# ========== ФУНКЦИИ ДЛЯ ПРОСМОТРА МЕДИА ==========
 @dp.callback_query(lambda c: c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     try:
@@ -3161,7 +3481,7 @@ async def view_media(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Не найден", show_alert=True)
             return
         try:
-            media_list = json.loads(item[4]) if item[4] else []
+            media_list = json.loads(item[3]) if item[3] else []
         except:
             media_list = []
             logger.error(f"Ошибка парсинга media для {category} {item_id}")
