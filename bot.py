@@ -117,165 +117,6 @@ def init_db():
         conn.commit()
         conn.close()
         print("✅ База данных клиентов готова")
-    except Exception as e:
-        print(f"❌ Ошибка при создании базы клиентов: {e}")
-
-def init_users_db():
-    try:
-        conn = sqlite3.connect(str(USERS_DB_PATH))
-        cur = conn.cursor()
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                balance INTEGER DEFAULT 0,
-                is_vip INTEGER DEFAULT 0,
-                invites INTEGER DEFAULT 0,
-                downloads_total INTEGER DEFAULT 0,
-                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS referrals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                referrer_id INTEGER NOT NULL,
-                referred_id INTEGER NOT NULL UNIQUE,
-                referred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS downloads_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                item_type TEXT NOT NULL,
-                item_id INTEGER NOT NULL,
-                vip_item INTEGER DEFAULT 0,
-                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS balance_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                amount INTEGER,
-                action TEXT NOT NULL,
-                admin_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        print("✅ База данных пользователей готова")
-    except Exception as e:
-        print(f"❌ Ошибка при создании базы пользователей: {e}")
-
-# Функция для создания временной копии базы данных
-def create_temp_db():
-    """Создает временную копию базы данных для редактирования"""
-    try:
-        if TEMP_DB_PATH.exists():
-            TEMP_DB_PATH.unlink()
-        shutil.copy2(DB_PATH, TEMP_DB_PATH)
-        logger.info(f"✅ Создана временная копия БД: {TEMP_DB_PATH}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Ошибка создания временной копии: {e}")
-        return False
-
-# Функция для применения изменений из временной БД
-def apply_temp_db_changes():
-    """Заменяет основную базу данных временной"""
-    try:
-        # Создаем бэкап перед заменой
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = BACKUP_DIR / f"pre_edit_backup_{timestamp}.db"
-        shutil.copy2(DB_PATH, backup_path)
-        
-        # Заменяем основную БД временной
-        if TEMP_DB_PATH.exists():
-            shutil.copy2(TEMP_DB_PATH, DB_PATH)
-            TEMP_DB_PATH.unlink()  # Удаляем временную копию
-            logger.info(f"✅ Изменения применены, создан бэкап: {backup_path}")
-            return True
-        return False
-    except Exception as e:
-        logger.error(f"❌ Ошибка применения изменений: {e}")
-        return False
-
-# Функция для отмены изменений
-def cancel_temp_db_changes():
-    """Отменяет изменения, удаляя временную БД"""
-    try:
-        if TEMP_DB_PATH.exists():
-            TEMP_DB_PATH.unlink()
-            logger.info("✅ Временная БД удалена, изменения отменены")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Ошибка отмены изменений: {e}")
-        return False
-
-def init_db():
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS clients (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS resourcepacks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                author TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                likes INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS configs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                full_desc TEXT NOT NULL,
-                media TEXT DEFAULT '[]',
-                download_url TEXT NOT NULL,
-                version TEXT,
-                is_vip INTEGER DEFAULT 0,
-                downloads INTEGER DEFAULT 0,
-                views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS favorites (
-                user_id INTEGER NOT NULL,
-                pack_id INTEGER NOT NULL,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, pack_id)
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        print("✅ База данных клиентов готова")
         
         # Добавляем тестовые данные, если таблицы пустые
         add_test_data_if_empty()
@@ -297,20 +138,13 @@ def add_test_data_if_empty():
                 VALUES 
                 ('Vanilla Client', 'Обычный ванильный клиент Minecraft', 'https://example.com/vanilla', '1.20.4', 0, 100),
                 ('OptiFine Client', 'Клиент с OptiFine для лучшей производительности', 'https://example.com/optifine', '1.20.4', 0, 200),
-                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50)
+                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50),
+                ('Lunar Client', 'Популярный PvP клиент', 'https://example.com/lunar', '1.16.5', 0, 300),
+                ('Badlion Client', 'Клиент для PvP с античитами', 'https://example.com/badlion', '1.16.5', 0, 250),
+                ('VIP PvP Client', 'Премиум PvP клиент', 'https://example.com/vip-pvp', '1.16.5', 1, 75)
             ''')
             conn.commit()
             print("✅ Тестовые данные добавлены в clients")
-        
-        # Проверяем resourcepacks - НЕ ДОБАВЛЯЕМ ТЕСТОВЫЕ ДАННЫЕ
-        cur.execute("SELECT COUNT(*) FROM resourcepacks")
-        if cur.fetchone()[0] == 0:
-            print("📝 Таблица resourcepacks пуста, тестовые данные не добавляются")
-        
-        # Проверяем configs - НЕ ДОБАВЛЯЕМ ТЕСТОВЫЕ ДАННЫЕ
-        cur.execute("SELECT COUNT(*) FROM configs")
-        if cur.fetchone()[0] == 0:
-            print("📝 Таблица configs пуста, тестовые данные не добавляются")
         
         conn.close()
     except Exception as e:
@@ -370,6 +204,51 @@ def init_users_db():
 
 init_db()
 init_users_db()
+
+# Функция для создания временной копии базы данных
+def create_temp_db():
+    """Создает временную копию базы данных для редактирования"""
+    try:
+        if TEMP_DB_PATH.exists():
+            TEMP_DB_PATH.unlink()
+        shutil.copy2(DB_PATH, TEMP_DB_PATH)
+        logger.info(f"✅ Создана временная копия БД: {TEMP_DB_PATH}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания временной копии: {e}")
+        return False
+
+# Функция для применения изменений из временной БД
+def apply_temp_db_changes():
+    """Заменяет основную базу данных временной"""
+    try:
+        # Создаем бэкап перед заменой
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = BACKUP_DIR / f"pre_edit_backup_{timestamp}.db"
+        shutil.copy2(DB_PATH, backup_path)
+        
+        # Заменяем основную БД временной
+        if TEMP_DB_PATH.exists():
+            shutil.copy2(TEMP_DB_PATH, DB_PATH)
+            TEMP_DB_PATH.unlink()  # Удаляем временную копию
+            logger.info(f"✅ Изменения применены, создан бэкап: {backup_path}")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"❌ Ошибка применения изменений: {e}")
+        return False
+
+# Функция для отмены изменений
+def cancel_temp_db_changes():
+    """Отменяет изменения, удаляя временную БД"""
+    try:
+        if TEMP_DB_PATH.exists():
+            TEMP_DB_PATH.unlink()
+            logger.info("✅ Временная БД удалена, изменения отменены")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка отмены изменений: {e}")
+        return False
 
 def check_all_clients():
     try:
@@ -1062,14 +941,6 @@ def get_all_config_versions(user_id=None):
         logger.error(f"Ошибка получения версий конфигов: {e}")
         return []
 
-def toggle_item_vip(table: str, item_id: int):
-    """Переключает VIP статус элемента (использует временную БД)"""
-    return toggle_vip_in_temp(table, item_id)
-
-def delete_item(table: str, item_id: int):
-    """Удаляет элемент (использует временную БД)"""
-    return delete_item_from_temp(table, item_id)
-
 def add_client(name, full_desc, url, version, is_vip=0, media=None):
     """Добавляет клиента во временную БД"""
     try:
@@ -1497,8 +1368,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ Сохранить и выйти", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ Отменить изменения", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     elif category == "packs":
@@ -1510,8 +1381,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ Сохранить и выйти", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ Отменить изменения", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     else:  # configs
@@ -1522,8 +1393,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ Сохранить и выйти", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ Отменить изменения", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     
@@ -1534,6 +1405,15 @@ def get_edit_media_keyboard(category, item_id):
         [InlineKeyboardButton(text="📸 Добавить фото", callback_data=f"add_media_{category}_{item_id}")],
         [InlineKeyboardButton(text="🗑 Удалить все фото", callback_data=f"del_media_{category}_{item_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_{category}_{item_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_save_cancel_keyboard(category):
+    """Клавиатура для сохранения/отмены изменений после добавления"""
+    buttons = [
+        [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
+        [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
+        [InlineKeyboardButton(text="◀️ Назад в админку", callback_data=f"admin_{category}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -2230,7 +2110,8 @@ async def edit_clients_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -2274,7 +2155,8 @@ async def edit_clients_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -2362,7 +2244,8 @@ async def edit_packs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -2405,7 +2288,8 @@ async def edit_packs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -2491,7 +2375,8 @@ async def edit_configs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -2534,7 +2419,8 @@ async def edit_configs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -2832,7 +2718,8 @@ async def toggle_vip_list(callback: CallbackQuery):
             if nav_row:
                 buttons.append(nav_row)
         
-        buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_{category}")])
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")])
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
         
         await callback.message.edit_text(
@@ -2900,7 +2787,8 @@ async def toggle_vip_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_{category}")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
     
     await callback.message.edit_text(
@@ -2952,7 +2840,8 @@ async def delete_clients_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -2995,7 +2884,8 @@ async def delete_clients_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -3095,7 +2985,8 @@ async def delete_packs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -3138,7 +3029,8 @@ async def delete_packs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -3237,7 +3129,8 @@ async def delete_configs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3280,7 +3173,8 @@ async def delete_configs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="❌ Отменить все изменения", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3402,7 +3296,10 @@ async def client_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['client_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
+                reply_markup=get_save_cancel_keyboard("clients")
+            )
             check_all_clients()
         else:
             await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
@@ -3416,7 +3313,10 @@ async def client_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['client_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
+                reply_markup=get_save_cancel_keyboard("clients")
+            )
             check_all_clients()
         else:
             await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
@@ -3498,7 +3398,10 @@ async def pack_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['pack_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
+                reply_markup=get_save_cancel_keyboard("packs")
+            )
         else:
             await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
         return
@@ -3511,7 +3414,10 @@ async def pack_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['pack_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
+                reply_markup=get_save_cancel_keyboard("packs")
+            )
         else:
             await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
         return
@@ -3586,7 +3492,10 @@ async def config_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['config_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
+                reply_markup=get_save_cancel_keyboard("configs")
+            )
         else:
             await message.answer("❌ Ошибка при добавлении конфига", reply_markup=get_main_keyboard(is_admin=True))
         return
@@ -3599,7 +3508,10 @@ async def config_media(message: Message, state: FSMContext):
         await state.clear()
         if item_id:
             vip_text = "💎 VIP" if data['config_vip'] else "📦 Обычный"
-            await message.answer(f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти'", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
+                reply_markup=get_save_cancel_keyboard("configs")
+            )
         else:
             await message.answer("❌ Ошибка при добавлении конфига", reply_markup=get_main_keyboard(is_admin=True))
         return
