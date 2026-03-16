@@ -97,11 +97,11 @@ def init_db():
             )
         ''')
         
-        # Новая таблица конфигов с привязкой к клиентам
+        # Таблица конфигов (привязаны к названию клиента, не к ID)
         cur.execute('''
             CREATE TABLE IF NOT EXISTS configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER NOT NULL,
+                client_name TEXT NOT NULL,
                 client_version TEXT NOT NULL,
                 name TEXT NOT NULL,
                 full_desc TEXT NOT NULL,
@@ -110,8 +110,7 @@ def init_db():
                 is_vip INTEGER DEFAULT 0,
                 downloads INTEGER DEFAULT 0,
                 views INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -157,62 +156,34 @@ def add_test_data_if_empty():
             conn.commit()
             print("✅ Тестовые данные добавлены в clients")
         
-        # Добавляем тестовые конфиги для клиентов
+        # Проверяем resourcepacks
+        cur.execute("SELECT COUNT(*) FROM resourcepacks")
+        if cur.fetchone()[0] == 0:
+            print("📝 Добавляю тестовые данные в resourcepacks...")
+            cur.execute('''
+                INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, downloads) 
+                VALUES 
+                ('Faithful', 'Классический ресурспак в стиле vanilla', 'https://example.com/faithful', '1.20.4', 'Faithful Team', 0, 500),
+                ('VIP Texture Pack', 'Эксклюзивный ресурспак для VIP', 'https://example.com/vip', '1.20.4', 'VIP Creator', 1, 30)
+            ''')
+            conn.commit()
+            print("✅ Тестовые данные добавлены в resourcepacks")
+        
+        # Проверяем configs
         cur.execute("SELECT COUNT(*) FROM configs")
         if cur.fetchone()[0] == 0:
             print("📝 Добавляю тестовые данные в configs...")
-            
-            # Получаем ID клиентов
-            cur.execute("SELECT id, name, version FROM clients")
-            clients = cur.fetchall()
-            
-            for client in clients:
-                client_id = client[0]
-                client_name = client[1]
-                client_version = client[2]
-                
-                # Добавляем конфиги для каждого клиента
-                cur.execute('''
-                    INSERT INTO configs (client_id, client_version, name, full_desc, download_url, is_vip, downloads) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    client_id, 
-                    client_version,
-                    f'Config for {client_name}',
-                    f'Стандартные настройки для {client_name}',
-                    f'https://example.com/config/{client_id}',
-                    0,
-                    50
-                ))
-                
-                cur.execute('''
-                    INSERT INTO configs (client_id, client_version, name, full_desc, download_url, is_vip, downloads) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    client_id,
-                    client_version,
-                    f'Performance Config for {client_name}',
-                    f'Настройки для максимальной производительности',
-                    f'https://example.com/config/perf/{client_id}',
-                    0,
-                    30
-                ))
-                
-                # VIP конфиг для VIP клиентов
-                if client[3] == 1:  # если клиент VIP
-                    cur.execute('''
-                        INSERT INTO configs (client_id, client_version, name, full_desc, download_url, is_vip, downloads) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        client_id,
-                        client_version,
-                        f'VIP Config for {client_name}',
-                        f'Премиум настройки для VIP клиента',
-                        f'https://example.com/config/vip/{client_id}',
-                        1,
-                        15
-                    ))
-            
+            cur.execute('''
+                INSERT INTO configs (client_name, client_version, name, full_desc, download_url, is_vip, downloads) 
+                VALUES 
+                ('OptiFine', '1.20.4', 'OptiFine High Settings', 'Высокие настройки графики для OptiFine', 'https://example.com/optifine-high', 0, 120),
+                ('OptiFine', '1.20.4', 'OptiFine Low Settings', 'Низкие настройки для слабых ПК', 'https://example.com/optifine-low', 0, 85),
+                ('OptiFine', '1.16.5', 'OptiFine Settings 1.16', 'Настройки для версии 1.16.5', 'https://example.com/optifine-116', 0, 45),
+                ('Lunar Client', '1.20.4', 'Lunar PvP Settings', 'PvP настройки для Lunar Client', 'https://example.com/lunar-pvp', 1, 200),
+                ('Lunar Client', '1.16.5', 'Lunar Settings', 'Базовые настройки Lunar', 'https://example.com/lunar', 0, 150),
+                ('Badlion', '1.20.4', 'Badlion Performance', 'Настройки для максимального FPS', 'https://example.com/badlion-perf', 0, 90),
+                ('VIP Client', '1.20.4', 'VIP Config Premium', 'Эксклюзивные настройки для VIP', 'https://example.com/vip-config', 1, 30)
+            ''')
             conn.commit()
             print("✅ Тестовые данные добавлены в configs")
         
@@ -350,129 +321,6 @@ def check_all_clients():
     except Exception as e:
         logger.error(f"Ошибка проверки клиентов: {e}")
         return []
-
-# Новая функция для получения всех клиентов
-def get_all_clients():
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute("SELECT id, name, version, is_vip FROM clients ORDER BY name")
-        clients = cur.fetchall()
-        conn.close()
-        return clients
-    except Exception as e:
-        logger.error(f"Ошибка получения списка клиентов: {e}")
-        return []
-
-# Новая функция для получения конфигов по клиенту и версии
-def get_configs_by_client(client_id: int, client_version: str = None, page: int = 1, per_page: int = 10, user_id: int = None):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        offset = (page - 1) * per_page
-        
-        if client_version:
-            cur.execute('''
-                SELECT id, name, full_desc, media, downloads, client_version, is_vip 
-                FROM configs 
-                WHERE client_id = ? AND client_version = ? 
-                ORDER BY id DESC LIMIT ? OFFSET ?
-            ''', (client_id, client_version, per_page, offset))
-            
-            cur.execute('SELECT COUNT(*) FROM configs WHERE client_id = ? AND client_version = ?', (client_id, client_version))
-        else:
-            cur.execute('''
-                SELECT id, name, full_desc, media, downloads, client_version, is_vip 
-                FROM configs 
-                WHERE client_id = ? 
-                ORDER BY id DESC LIMIT ? OFFSET ?
-            ''', (client_id, per_page, offset))
-            
-            cur.execute('SELECT COUNT(*) FROM configs WHERE client_id = ?', (client_id,))
-        
-        items = cur.fetchall()
-        total = cur.fetchone()[0]
-        
-        converted_items = []
-        for item in items:
-            item_list = list(item)
-            if len(item_list) > 4 and item_list[4] is not None:
-                try:
-                    item_list[4] = int(item_list[4])
-                except:
-                    item_list[4] = 0
-            converted_items.append(tuple(item_list))
-        
-        conn.close()
-        return converted_items, total
-    except Exception as e:
-        logger.error(f"Ошибка получения конфигов: {e}")
-        return [], 0
-
-# Новая функция для получения уникальных версий клиента для конфигов
-def get_client_config_versions(client_id: int):
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute('SELECT DISTINCT client_version FROM configs WHERE client_id = ? ORDER BY client_version DESC', (client_id,))
-        versions = [v[0] for v in cur.fetchall()]
-        conn.close()
-        return versions
-    except Exception as e:
-        logger.error(f"Ошибка получения версий конфигов: {e}")
-        return []
-
-# Новая функция для добавления конфига
-def add_config(client_id: int, client_version: str, name: str, full_desc: str, url: str, is_vip: int = 0, media: list = None):
-    try:
-        if not TEMP_DB_PATH.exists():
-            logger.error("Временная БД не существует")
-            return None
-            
-        conn = sqlite3.connect(str(TEMP_DB_PATH))
-        cur = conn.cursor()
-        
-        if media is None:
-            media = []
-        media_json = json.dumps(media)
-        
-        cur.execute('''
-            INSERT INTO configs (client_id, client_version, name, full_desc, download_url, is_vip, media) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (client_id, client_version, name, full_desc, url, is_vip, media_json))
-        
-        conn.commit()
-        item_id = cur.lastrowid
-        conn.close()
-        
-        logger.info(f"✅ Конфиг добавлен во временную БД: ID={item_id}, name={name}")
-        return item_id
-    except Exception as e:
-        logger.error(f"Ошибка добавления конфига: {e}")
-        return None
-
-# Новая функция для обновления конфига
-def update_config(item_id: int, field: str, value):
-    return update_item_in_temp("configs", item_id, field, value)
-
-def update_config_media(item_id: int, media_list: list):
-    try:
-        if not TEMP_DB_PATH.exists():
-            logger.error("Временная БД не существует")
-            return False
-            
-        conn = sqlite3.connect(str(TEMP_DB_PATH))
-        cur = conn.cursor()
-        if media_list is None:
-            media_list = []
-        media_json = json.dumps(media_list)
-        cur.execute('UPDATE configs SET media = ? WHERE id = ?', (media_json, item_id))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка обновления медиа конфига {item_id}: {e}")
-        return False
 
 def get_all_backups():
     try:
@@ -841,13 +689,13 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         elif table == "configs":
             if has_vip:
                 if vip_filter == "vip":
-                    cur.execute('SELECT id, name, full_desc, media, downloads, client_version, is_vip FROM configs WHERE is_vip = 1 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 1 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
                 elif vip_filter == "regular":
-                    cur.execute('SELECT id, name, full_desc, media, downloads, client_version, is_vip FROM configs WHERE is_vip = 0 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 0 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
                 else:
-                    cur.execute('SELECT id, name, full_desc, media, downloads, client_version, is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
             else:
-                cur.execute('SELECT id, name, full_desc, media, downloads, client_version, 0 as is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, 0 as is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
         
         items = cur.fetchall()
         
@@ -855,11 +703,11 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
         converted_items = []
         for item in items:
             item_list = list(item)
-            if len(item_list) > 4 and item_list[4] is not None:
+            if len(item_list) > 6 and item_list[6] is not None:
                 try:
-                    item_list[4] = int(item_list[4])
+                    item_list[6] = int(item_list[6])
                 except (ValueError, TypeError):
-                    item_list[4] = 0
+                    item_list[6] = 0
             converted_items.append(tuple(item_list))
         
         conn.close()
@@ -1080,6 +928,119 @@ def get_all_pack_versions(user_id=None):
     except Exception as e:
         logger.error(f"Ошибка получения версий ресурспаков: {e}")
         return []
+
+# ========== НОВЫЕ ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
+
+def get_all_config_clients():
+    """Получает список уникальных клиентов, для которых есть конфиги"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT client_name FROM configs ORDER BY client_name')
+        clients = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return clients
+    except Exception as e:
+        logger.error(f"Ошибка получения списка клиентов для конфигов: {e}")
+        return []
+
+def get_config_versions_by_client(client_name: str):
+    """Получает список версий для конкретного клиента"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT client_version FROM configs WHERE client_name = ? ORDER BY client_version DESC', (client_name,))
+        versions = [row[0] for row in cur.fetchall()]
+        conn.close()
+        return versions
+    except Exception as e:
+        logger.error(f"Ошибка получения версий конфигов для клиента {client_name}: {e}")
+        return []
+
+def get_configs_by_client_and_version(client_name: str, version: str, page: int = 1, per_page: int = 10, user_id: int = None):
+    """Получает конфиги для конкретного клиента и версии"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        offset = (page - 1) * per_page
+        
+        cur.execute('''
+            SELECT id, client_name, client_version, name, full_desc, media, download_url, is_vip, downloads, views 
+            FROM configs 
+            WHERE client_name = ? AND client_version = ? 
+            ORDER BY id DESC LIMIT ? OFFSET ?
+        ''', (client_name, version, per_page, offset))
+        
+        items = cur.fetchall()
+        
+        cur.execute('SELECT COUNT(*) FROM configs WHERE client_name = ? AND client_version = ?', (client_name, version))
+        total = cur.fetchone()[0]
+        
+        converted_items = []
+        for item in items:
+            item_list = list(item)
+            if len(item_list) > 8 and item_list[8] is not None:
+                try:
+                    item_list[8] = int(item_list[8])
+                except:
+                    item_list[8] = 0
+            converted_items.append(tuple(item_list))
+        
+        conn.close()
+        return converted_items, total
+    except Exception as e:
+        logger.error(f"Ошибка получения конфигов: {e}")
+        return [], 0
+
+def add_config(client_name: str, client_version: str, name: str, full_desc: str, url: str, is_vip: int = 0, media: list = None):
+    """Добавляет конфиг во временную БД"""
+    try:
+        if not TEMP_DB_PATH.exists():
+            logger.error("Временная БД не существует")
+            return None
+            
+        conn = sqlite3.connect(str(TEMP_DB_PATH))
+        cur = conn.cursor()
+        
+        if media is None:
+            media = []
+        media_json = json.dumps(media)
+        
+        cur.execute('''
+            INSERT INTO configs (client_name, client_version, name, full_desc, download_url, is_vip, media) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (client_name, client_version, name, full_desc, url, is_vip, media_json))
+        
+        conn.commit()
+        item_id = cur.lastrowid
+        conn.close()
+        logger.info(f"✅ Конфиг добавлен во временную БД: ID={item_id}, name={name}")
+        return item_id
+    except Exception as e:
+        logger.error(f"Ошибка добавления конфига: {e}")
+        return None
+
+def update_config(item_id: int, field: str, value):
+    return update_item_in_temp("configs", item_id, field, value)
+
+def update_config_media(item_id: int, media_list: list):
+    try:
+        if not TEMP_DB_PATH.exists():
+            logger.error("Временная БД не существует")
+            return False
+            
+        conn = sqlite3.connect(str(TEMP_DB_PATH))
+        cur = conn.cursor()
+        if media_list is None:
+            media_list = []
+        media_json = json.dumps(media_list)
+        cur.execute('UPDATE configs SET media = ? WHERE id = ?', (media_json, item_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка обновления медиа конфига {item_id}: {e}")
+        return False
 
 def add_client(name, full_desc, url, version, is_vip=0, media=None):
     try:
@@ -1321,16 +1282,14 @@ class AdminStates(StatesGroup):
     pack_media = State()
     pack_vip = State()
     
-    # Новые состояния для конфигов
-    config_client_select = State()
-    config_client_version_select = State()
+    # Состояния для конфигов
+    config_client_name = State()
+    config_client_version = State()
     config_name = State()
     config_full_desc = State()
     config_url = State()
     config_media = State()
     config_vip = State()
-    config_client_id = State()
-    config_client_version = State()
     
     edit_value = State()
     edit_media = State()
@@ -1362,24 +1321,30 @@ def get_version_keyboard(versions, category, user_id=None):
 def get_items_keyboard(items, category, page, total_pages, show_vip=False):
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
-        
         if category == "configs":
-            version = item[5] if len(item) > 5 else "?"
-            is_vip = item[6] if len(item) > 6 else 0
-            button_text = f"{name[:30]} (v{version})\n📥 {format_number(downloads)}"
+            # Для конфигов другая структура
+            item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
+            try:
+                media_list = json.loads(media_json) if media_json else []
+            except:
+                media_list = []
+            preview = "🖼️" if media_list else "📄"
+            vip_icon = "💎 " if is_vip and show_vip else ""
+            button_text = f"{preview} {vip_icon}{name[:30]} (v{client_version})\n📥 {format_number(downloads)}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"detail_configs_{item_id}")])
         else:
+            item_id, name, full_desc, media_json, downloads = item[0], item[1], item[2], item[3], item[4]
             version = item[5] if len(item) > 5 else "?"
             is_vip = item[6] if len(item) > 6 else 0
-        
-        try:
-            media_list = json.loads(media_json) if media_json else []
-        except:
-            media_list = []
-        preview = "🖼️" if media_list else "📄"
-        vip_icon = "💎 " if is_vip and show_vip else ""
-        button_text = f"{preview} {vip_icon}{name[:30]} ({version})\n📥 {format_number(downloads)}"
-        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"detail_{category}_{item_id}")])
+            try:
+                media_list = json.loads(media_json) if media_json else []
+            except:
+                media_list = []
+            preview = "🖼️" if media_list else "📄"
+            vip_icon = "💎 " if is_vip and show_vip else ""
+            button_text = f"{preview} {vip_icon}{name[:30]} ({version})\n📥 {format_number(downloads)}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"detail_{category}_{item_id}")])
+    
     nav_row = []
     if page > 1: nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"page_{category}_{page-1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
@@ -1421,10 +1386,16 @@ def get_admin_list_keyboard(items, category, page, total_pages, action):
     """Создает клавиатуру со списком элементов для админки"""
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
-        vip_icon = "💎 " if is_vip else ""
-        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
-        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"{action}_{category}_{item_id}")])
+        if category == "configs":
+            item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
+            vip_icon = "💎 " if is_vip else ""
+            button_text = f"{item_id}. {vip_icon}{name[:30]} ({client_name} v{client_version}) 📥 {downloads}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"{action}_{category}_{item_id}")])
+        else:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
+            vip_icon = "💎 " if is_vip else ""
+            button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"{action}_{category}_{item_id}")])
     
     # Навигация по страницам
     nav_row = []
@@ -1470,10 +1441,10 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
         ]
     else:  # configs
         fields = [
-            [InlineKeyboardButton(text="📝 Название", callback_data=f"edit_field_{category}_name_{item_id}")],
+            [InlineKeyboardButton(text="📝 Название конфига", callback_data=f"edit_field_{category}_name_{item_id}")],
             [InlineKeyboardButton(text="📚 Описание", callback_data=f"edit_field_{category}_full_desc_{item_id}")],
-            [InlineKeyboardButton(text="📌 Клиент", callback_data=f"edit_field_{category}_client_id_{item_id}")],
-            [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_field_{category}_version_{item_id}")],
+            [InlineKeyboardButton(text="🎮 Клиент", callback_data=f"edit_field_{category}_client_name_{item_id}")],
+            [InlineKeyboardButton(text="🔢 Версия клиента", callback_data=f"edit_field_{category}_client_version_{item_id}")],
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
@@ -1501,15 +1472,12 @@ def get_save_cancel_keyboard(category):
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Новая функция для клавиатуры выбора клиента для конфигов
-def get_clients_for_config_keyboard(clients):
+def get_config_clients_keyboard(clients):
+    """Клавиатура для выбора клиента из списка конфигов"""
     buttons = []
     row = []
     for client in clients:
-        client_id, name, version, is_vip = client
-        vip_icon = "💎 " if is_vip else ""
-        button_text = f"{vip_icon}{name}"
-        row.append(InlineKeyboardButton(text=button_text, callback_data=f"config_client_{client_id}"))
+        row.append(InlineKeyboardButton(text=client, callback_data=f"config_client_{client}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -1518,12 +1486,12 @@ def get_clients_for_config_keyboard(clients):
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Новая функция для клавиатуры выбора версии клиента для конфигов
-def get_client_versions_keyboard(client_id, versions):
+def get_config_versions_keyboard(client_name, versions):
+    """Клавиатура для выбора версии клиента"""
     buttons = []
     row = []
     for version in versions:
-        row.append(InlineKeyboardButton(text=version, callback_data=f"config_client_ver_{client_id}_{version}"))
+        row.append(InlineKeyboardButton(text=version, callback_data=f"config_version_{client_name}_{version}"))
         if len(row) == 3:
             buttons.append(row)
             row = []
@@ -1628,30 +1596,31 @@ async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== НОВАЯ ЛОГИКА ДЛЯ КОНФИГОВ ==========
+
 @dp.message(F.text == "⚙️ Конфиги")
 async def configs_menu(message: Message, state: FSMContext):
-    """Показывает список клиентов для выбора конфига"""
-    clients = get_all_clients()
+    """Показывает список клиентов, для которых есть конфиги"""
+    clients = get_all_config_clients()
     if not clients:
-        await message.answer("📭 Пока нет клиентов для конфигов")
+        await message.answer("📭 Пока нет доступных конфигов")
         return
     
     await message.answer(
         "⚙️ Выбери клиент, для которого нужен конфиг:",
-        reply_markup=get_clients_for_config_keyboard(clients)
+        reply_markup=get_config_clients_keyboard(clients)
     )
 
 @dp.callback_query(lambda c: c.data.startswith("config_client_") and not c.data.startswith("config_client_ver_"))
 async def config_client_selected(callback: CallbackQuery, state: FSMContext):
     """Обработчик выбора клиента для конфига"""
-    client_id = int(callback.data.replace("config_client_", ""))
+    client_name = callback.data.replace("config_client_", "")
     
-    # Получаем уникальные версии клиента, для которых есть конфиги
-    versions = get_client_config_versions(client_id)
+    # Получаем список версий для этого клиента
+    versions = get_config_versions_by_client(client_name)
     
     if not versions:
         await callback.message.edit_text(
-            "❌ Для этого клиента пока нет конфигов",
+            f"❌ Для клиента {client_name} пока нет конфигов",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="config_back_to_clients")]])
         )
         await callback.answer()
@@ -1659,63 +1628,58 @@ async def config_client_selected(callback: CallbackQuery, state: FSMContext):
     
     # Если только одна версия, показываем конфиги сразу
     if len(versions) == 1:
-        await show_configs_for_version(callback.message, client_id, versions[0], state)
+        await show_configs_for_client(callback.message, client_name, versions[0], state)
     else:
         # Если несколько версий, спрашиваем какую выбрать
         await callback.message.edit_text(
-            "📌 Выбери версию клиента:",
-            reply_markup=get_client_versions_keyboard(client_id, versions)
+            f"📌 Выбери версию для {client_name}:",
+            reply_markup=get_config_versions_keyboard(client_name, versions)
         )
     
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("config_client_ver_"))
-async def config_client_version_selected(callback: CallbackQuery, state: FSMContext):
-    """Обработчик выбора версии клиента для конфига"""
-    parts = callback.data.replace("config_client_ver_", "").split("_")
-    client_id = int(parts[0])
-    version = "_".join(parts[1:])  # Восстанавливаем версию, если она содержит подчеркивания
+@dp.callback_query(lambda c: c.data.startswith("config_version_"))
+async def config_version_selected(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора версии клиента"""
+    data = callback.data.replace("config_version_", "")
+    # Разделяем на клиента и версию (версия может содержать точки)
+    parts = data.split("_", 1)
+    client_name = parts[0]
+    version = parts[1] if len(parts) > 1 else "1.20.4"
     
-    await show_configs_for_version(callback.message, client_id, version, state)
+    await show_configs_for_client(callback.message, client_name, version, state)
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "config_back_to_clients")
 async def config_back_to_clients(callback: CallbackQuery):
-    """Возврат к списку клиентов для конфигов"""
-    clients = get_all_clients()
+    """Возврат к списку клиентов"""
+    clients = get_all_config_clients()
     if not clients:
-        await callback.message.edit_text("📭 Пока нет клиентов для конфигов")
+        await callback.message.edit_text("📭 Пока нет доступных конфигов")
         await callback.answer()
         return
     
     await callback.message.edit_text(
         "⚙️ Выбери клиент, для которого нужен конфиг:",
-        reply_markup=get_clients_for_config_keyboard(clients)
+        reply_markup=get_config_clients_keyboard(clients)
     )
     await callback.answer()
 
-async def show_configs_for_version(message: Message, client_id: int, version: str, state: FSMContext):
+async def show_configs_for_client(message: Message, client_name: str, version: str, state: FSMContext):
     """Показывает конфиги для конкретного клиента и версии"""
     user_id = message.chat.id
     
-    items, total = get_configs_by_client(client_id, version, 1, user_id=user_id)
+    items, total = get_configs_by_client_and_version(client_name, version, 1, user_id=user_id)
     
     if not items:
         await message.edit_text(
-            f"❌ Для клиента версии {version} пока нет конфигов",
+            f"❌ Для {client_name} версии {version} пока нет конфигов",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="config_back_to_clients")]])
         )
         return
     
     total_pages = (total + 9) // 10
-    await state.update_data(config_client_id=client_id, config_version=version, config_page=1)
-    
-    # Получаем имя клиента для красивого отображения
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (client_id,))
-    client_name = cur.fetchone()[0]
-    conn.close()
+    await state.update_data(config_client_name=client_name, config_version=version, config_page=1)
     
     await message.edit_text(
         f"⚙️ Конфиги для {client_name} (версия {version}) (стр 1/{total_pages}):",
@@ -1723,6 +1687,7 @@ async def show_configs_for_version(message: Message, client_id: int, version: st
     )
 
 # ========== ДЕТАЛЬНЫЙ ПРОСМОТР КОНФИГА ==========
+
 @dp.callback_query(lambda c: c.data.startswith("detail_configs_"))
 async def config_detail_view(callback: CallbackQuery, state: FSMContext):
     """Детальный просмотр конфига"""
@@ -1738,22 +1703,16 @@ async def config_detail_view(callback: CallbackQuery, state: FSMContext):
     user_status = get_user_status(user_id)
     is_vip = user_status.get('is_vip', False)
     
-    # item: id, client_id, client_version, name, full_desc, media, download_url, is_vip, downloads, views, created_at
+    # item: id, client_name, client_version, name, full_desc, media, download_url, is_vip, downloads, views, created_at
+    client_name = item[1]
+    client_version = item[2]
     name = item[3]
     full_desc = item[4]
     media = item[5]
     download_url = item[6]
-    client_version = item[2]
     item_is_vip = item[7] == 1
     downloads = int(item[8]) if item[8] else 0
     views = int(item[9]) if item[9] else 0
-    
-    # Получаем имя клиента
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (item[1],))
-    client_name = cur.fetchone()[0]
-    conn.close()
     
     try:
         media_list = json.loads(media) if media else []
@@ -1788,32 +1747,30 @@ async def config_detail_view(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== ПАГИНАЦИЯ ДЛЯ КОНФИГОВ ==========
+
 @dp.callback_query(lambda c: c.data.startswith("page_configs_"))
 async def config_pagination(callback: CallbackQuery, state: FSMContext):
     """Пагинация для списка конфигов"""
     page = int(callback.data.replace("page_configs_", ""))
     data = await state.get_data()
     
-    client_id = data.get("config_client_id")
+    client_name = data.get("config_client_name")
     version = data.get("config_version")
     user_id = callback.from_user.id
     
-    items, total = get_configs_by_client(client_id, version, page, user_id=user_id)
+    if not client_name or not version:
+        await config_back_to_clients(callback)
+        return
+    
+    items, total = get_configs_by_client_and_version(client_name, version, page, user_id=user_id)
     
     if total == 0:
-        await callback.message.edit_text(f"⚙️ Нет конфигов для выбранного клиента")
+        await callback.message.edit_text(f"⚙️ Нет конфигов для {client_name} версии {version}")
         await callback.answer()
         return
     
     total_pages = max(1, (total + 9) // 10)
     await state.update_data(config_page=page)
-    
-    # Получаем имя клиента
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (client_id,))
-    client_name = cur.fetchone()[0]
-    conn.close()
     
     await callback.message.edit_text(
         f"⚙️ Конфиги для {client_name} (версия {version}) (стр {page}/{total_pages}):",
@@ -1822,25 +1779,25 @@ async def config_pagination(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== НАЗАД К СПИСКУ КОНФИГОВ ==========
+
 @dp.callback_query(lambda c: c.data == "back_configs")
 async def back_to_configs(callback: CallbackQuery, state: FSMContext):
     """Возврат к списку конфигов"""
     data = await state.get_data()
     
-    client_id = data.get("config_client_id")
+    client_name = data.get("config_client_name")
     version = data.get("config_version")
     user_id = callback.from_user.id
     
-    if not client_id or not version:
-        # Если нет данных в состоянии, возвращаемся к выбору клиента
+    if not client_name or not version:
         await config_back_to_clients(callback)
         return
     
-    items, total = get_configs_by_client(client_id, version, 1, user_id=user_id)
+    items, total = get_configs_by_client_and_version(client_name, version, 1, user_id=user_id)
     
     if total == 0:
         await callback.message.edit_text(
-            f"⚙️ Нет конфигов для выбранного клиента",
+            f"⚙️ Нет конфигов для {client_name} версии {version}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="config_back_to_clients")]])
         )
         await callback.answer()
@@ -1848,13 +1805,6 @@ async def back_to_configs(callback: CallbackQuery, state: FSMContext):
     
     total_pages = max(1, (total + 9) // 10)
     await state.update_data(config_page=1)
-    
-    # Получаем имя клиента
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (client_id,))
-    client_name = cur.fetchone()[0]
-    conn.close()
     
     try:
         await callback.message.edit_text(
@@ -1878,6 +1828,7 @@ async def back_to_configs(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== СКАЧИВАНИЕ КОНФИГА ==========
+
 @dp.callback_query(lambda c: c.data.startswith("download_configs_"))
 async def download_config(callback: CallbackQuery):
     """Скачивание конфига"""
@@ -1907,6 +1858,8 @@ async def download_config(callback: CallbackQuery):
     vip_prefix = "💎 " if item_is_vip else ""
     await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{download_url}")
     await callback.answer("✅ Ссылка отправлена!")
+
+# ========== ОСТАЛЬНЫЕ ОБРАБОТЧИКИ ==========
 
 @dp.message(F.text == "💎 VIP")
 async def vip_menu(message: Message):
@@ -1978,7 +1931,7 @@ async def back_to_profile(callback: CallbackQuery):
     await show_profile(callback.message)
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("page_"))
+@dp.callback_query(lambda c: c.data.startswith("page_") and not c.data.startswith("page_configs_"))
 async def pagination(callback: CallbackQuery, state: FSMContext):
     _, category, page = callback.data.split("_")
     page = int(page)
@@ -2002,7 +1955,6 @@ async def pagination(callback: CallbackQuery, state: FSMContext):
             return
         title = f"🎨 Ресурспаки для версии {version}"
     else:
-        # Для других категорий используем стандартную пагинацию
         await callback.answer()
         return
     
@@ -2085,7 +2037,6 @@ async def detail_view(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ back_to_list ==========
 @dp.callback_query(lambda c: c.data.startswith("back_") and not c.data.startswith("back_to_") and c.data != "back_configs")
 async def back_to_list(callback: CallbackQuery, state: FSMContext):
     category = callback.data.replace("back_", "")
@@ -2387,7 +2338,8 @@ async def admin_packs(callback: CallbackQuery):
     await callback.message.edit_text("🎨 Управление ресурспаками\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
-# ========== НОВОЕ УПРАВЛЕНИЕ КОНФИГАМИ ==========
+# ========== УПРАВЛЕНИЕ КОНФИГАМИ ==========
+
 @dp.callback_query(lambda c: c.data == "admin_configs")
 async def admin_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2404,6 +2356,7 @@ async def admin_configs(callback: CallbackQuery):
     await callback.answer()
 
 # ========== ДОБАВЛЕНИЕ КОНФИГА ==========
+
 @dp.callback_query(lambda c: c.data == "add_config_start")
 async def add_config_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2419,50 +2372,21 @@ async def add_config_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     
-    # Показываем список клиентов для выбора
-    clients = get_all_clients()
-    if not clients:
-        await callback.message.edit_text(
-            "❌ Сначала добавьте клиентов",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
-        )
-        await callback.answer()
-        return
-    
-    buttons = []
-    for client in clients:
-        client_id, name, version, is_vip = client
-        vip_icon = "💎 " if is_vip else ""
-        buttons.append([InlineKeyboardButton(text=f"{vip_icon}{name} (v{version})", callback_data=f"add_config_client_{client_id}")])
-    
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
-    
-    await callback.message.edit_text(
-        "📝 Выбери клиент для конфига:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    await state.set_state(AdminStates.config_client_name)
+    await callback.message.edit_text("📝 Введи название клиента, для которого предназначен конфиг:")
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("add_config_client_"))
-async def add_config_client_selected(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    client_id = int(callback.data.replace("add_config_client_", ""))
-    
-    # Получаем информацию о клиенте
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name, version FROM clients WHERE id = ?", (client_id,))
-    client_name, client_version = cur.fetchone()
-    conn.close()
-    
-    await state.update_data(config_client_id=client_id, config_client_version=client_version)
+@dp.message(AdminStates.config_client_name)
+async def config_client_name(message: Message, state: FSMContext):
+    await state.update_data(config_client_name=message.text)
+    await state.set_state(AdminStates.config_client_version)
+    await message.answer("🔢 Введи версию клиента (например 1.20.4):")
+
+@dp.message(AdminStates.config_client_version)
+async def config_client_version(message: Message, state: FSMContext):
+    await state.update_data(config_client_version=message.text)
     await state.set_state(AdminStates.config_name)
-    
-    await callback.message.edit_text(f"📝 Введи название конфига для клиента {client_name} (версия {client_version}):")
-    await callback.answer()
+    await message.answer("📝 Введи название конфига:")
 
 @dp.message(AdminStates.config_name)
 async def config_name(message: Message, state: FSMContext):
@@ -2495,20 +2419,23 @@ async def config_media(message: Message, state: FSMContext):
     media_list = data.get('media_list', [])
     
     if message.text and message.text.lower() == 'готово':
-        client_id = data.get('config_client_id')
+        client_name = data.get('config_client_name')
         client_version = data.get('config_client_version')
         name = data.get('config_name')
         full_desc = data.get('config_full_desc')
         url = data.get('config_url')
         is_vip = data.get('config_vip', 0)
         
-        item_id = add_config(client_id, client_version, name, full_desc, url, is_vip, media_list)
+        if not client_version or client_version.strip() == "":
+            client_version = "1.20"
+        
+        item_id = add_config(client_name, client_version, name, full_desc, url, is_vip, media_list)
         await state.clear()
         
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nДобавлено фото: {len(media_list)}",
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nДобавлено фото: {len(media_list)}",
                 reply_markup=get_save_cancel_keyboard("configs")
             )
         else:
@@ -2516,20 +2443,23 @@ async def config_media(message: Message, state: FSMContext):
         return
     
     if message.text and message.text.lower() == 'пропустить':
-        client_id = data.get('config_client_id')
+        client_name = data.get('config_client_name')
         client_version = data.get('config_client_version')
         name = data.get('config_name')
         full_desc = data.get('config_full_desc')
         url = data.get('config_url')
         is_vip = data.get('config_vip', 0)
         
-        item_id = add_config(client_id, client_version, name, full_desc, url, is_vip, [])
+        if not client_version or client_version.strip() == "":
+            client_version = "1.20"
+        
+        item_id = add_config(client_name, client_version, name, full_desc, url, is_vip, [])
         await state.clear()
         
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\n{vip_text}\nБез фото",
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nБез фото",
                 reply_markup=get_save_cancel_keyboard("configs")
             )
         else:
@@ -2544,13 +2474,13 @@ async def config_media(message: Message, state: FSMContext):
         await message.answer("❌ Отправь фото, или напиши готово / пропустить")
 
 # ========== РЕДАКТИРОВАНИЕ КОНФИГОВ ==========
+
 @dp.callback_query(lambda c: c.data == "edit_configs_list")
 async def edit_configs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    # Создаем временную копию БД для редактирования
     if not create_temp_db():
         await callback.message.edit_text(
             "❌ Ошибка создания временной копии БД", 
@@ -2574,9 +2504,9 @@ async def edit_configs_list(callback: CallbackQuery):
     
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        button_text = f"{item_id}. {vip_icon}{name[:30]} (v{version}) 📥 {downloads}"
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({client_name} v{client_version}) 📥 {downloads}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"edit_item_configs_{item_id}")])
     
     if total_pages > 1:
@@ -2617,9 +2547,9 @@ async def edit_configs_page(callback: CallbackQuery):
     
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        button_text = f"{item_id}. {vip_icon}{name[:30]} (v{version}) 📥 {downloads}"
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({client_name} v{client_version}) 📥 {downloads}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"edit_item_configs_{item_id}")])
     
     nav_row = []
@@ -2668,20 +2598,14 @@ async def edit_config_select(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(edit_item_id=item_id, edit_category="configs")
     
-    # Получаем имя клиента для отображения
-    conn = sqlite3.connect(str(TEMP_DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (item[1],))
-    client_name = cur.fetchone()[0] if cur.fetchone() else "Неизвестный клиент"
-    conn.close()
-    
     await callback.message.edit_text(
-        f"✏️ Редактирование конфига: {item[3]}\nДля клиента: {client_name} (версия {item[2]})\n\nЧто изменить?",
+        f"✏️ Редактирование конфига: {item[3]}\nДля клиента: {item[1]} (версия {item[2]})\n\nЧто изменить?",
         reply_markup=get_edit_item_keyboard("configs", item_id, media_count, is_vip)
     )
     await callback.answer()
 
 # ========== РЕДАКТИРОВАНИЕ ПОЛЕЙ КОНФИГА ==========
+
 @dp.callback_query(lambda c: c.data.startswith("edit_field_configs_"))
 async def edit_config_field_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -2695,8 +2619,8 @@ async def edit_config_field_start(callback: CallbackQuery, state: FSMContext):
     field_map = {
         'name': 'name',
         'full_desc': 'full_desc',
-        'version': 'client_version',
-        'client_id': 'client_id',
+        'client_name': 'client_name',
+        'client_version': 'client_version',
         'download_url': 'download_url'
     }
     
@@ -2708,55 +2632,11 @@ async def edit_config_field_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category="configs")
     await state.set_state(AdminStates.edit_value)
     
-    if field == 'client_id':
-        # Для выбора клиента показываем список
-        clients = get_all_clients()
-        buttons = []
-        for client in clients:
-            client_id, name, version, is_vip = client
-            vip_icon = "💎 " if is_vip else ""
-            buttons.append([InlineKeyboardButton(text=f"{vip_icon}{name} (v{version})", callback_data=f"edit_config_client_{item_id}_{client_id}")])
-        buttons.append([InlineKeyboardButton(text="◀️ Отмена", callback_data=f"edit_item_configs_{item_id}")])
-        
-        await callback.message.edit_text(
-            "📌 Выбери нового клиента для конфига:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
-    else:
-        await callback.message.edit_text(f"✏️ Введи новое значение для поля {field}:")
-    
+    await callback.message.edit_text(f"✏️ Введи новое значение для поля {field}:")
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("edit_config_client_"))
-async def edit_config_client_select(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    item_id = int(parts[3])
-    new_client_id = int(parts[4])
-    
-    # Получаем версию нового клиента
-    conn = sqlite3.connect(str(DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT version FROM clients WHERE id = ?", (new_client_id,))
-    client_version = cur.fetchone()[0]
-    conn.close()
-    
-    # Обновляем и клиента, и версию
-    success1 = update_item_in_temp("configs", item_id, "client_id", str(new_client_id))
-    success2 = update_item_in_temp("configs", item_id, "client_version", client_version)
-    
-    if success1 and success2:
-        await callback.answer("✅ Клиент для конфига обновлен!", show_alert=True)
-    else:
-        await callback.answer("❌ Ошибка при обновлении", show_alert=True)
-    
-    # Возвращаемся к редактированию
-    await edit_config_select(callback, state)
-
 # ========== УДАЛЕНИЕ КОНФИГОВ ==========
+
 @dp.callback_query(lambda c: c.data == "delete_configs_list")
 async def delete_configs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2784,9 +2664,9 @@ async def delete_configs_list(callback: CallbackQuery):
     
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        button_text = f"{item_id}. {vip_icon}{name[:30]} (v{version}) 📥 {downloads}"
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({client_name} v{client_version}) 📥 {downloads}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_configs_{item_id}")])
     
     if total_pages > 1:
@@ -2827,9 +2707,9 @@ async def delete_configs_page(callback: CallbackQuery):
     
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
         vip_icon = "💎 " if is_vip else ""
-        button_text = f"{item_id}. {vip_icon}{name[:30]} (v{version}) 📥 {downloads}"
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({client_name} v{client_version}) 📥 {downloads}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_configs_{item_id}")])
     
     nav_row = []
@@ -2868,20 +2748,13 @@ async def delete_config_confirm(callback: CallbackQuery):
         await callback.answer("❌ Конфиг не найден", show_alert=True)
         return
     
-    # Получаем имя клиента
-    conn = sqlite3.connect(str(TEMP_DB_PATH))
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM clients WHERE id = ?", (item[1],))
-    client_name = cur.fetchone()[0] if cur.fetchone() else "Неизвестный клиент"
-    conn.close()
-    
     buttons = [
         [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_configs_confirm_{item_id}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_configs_list")]
     ]
     
     await callback.message.edit_text(
-        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить конфиг:\n{item[3]}\nДля клиента: {client_name} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить конфиг:\n{item[3]}\nДля клиента: {item[1]} (версия {item[2]}) (ID: {item_id})?\n\nЭто действие нельзя отменить!",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
     await callback.answer()
@@ -2908,6 +2781,7 @@ async def delete_config_execute(callback: CallbackQuery):
     await delete_configs_list(callback)
 
 # ========== ПЕРЕКЛЮЧЕНИЕ VIP ДЛЯ КОНФИГОВ ==========
+
 @dp.callback_query(lambda c: c.data.startswith("toggle_vip_configs"))
 async def toggle_vip_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2930,9 +2804,9 @@ async def toggle_vip_configs(callback: CallbackQuery):
         
         buttons = []
         for item in items:
-            item_id, name, full_desc, media_json, downloads, version, is_vip = item
+            item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
             status = "💎 VIP" if is_vip else "🔘 Обычный"
-            button_text = f"{item_id}. {name[:30]} (v{version}) - {status}"
+            button_text = f"{item_id}. {name[:30]} ({client_name} v{client_version}) - {status}"
             buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_configs_{item_id}")])
         
         if total_pages > 1:
@@ -2986,9 +2860,9 @@ async def toggle_vip_configs_page(callback: CallbackQuery):
     
     buttons = []
     for item in items:
-        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item
         status = "💎 VIP" if is_vip else "🔘 Обычный"
-        button_text = f"{item_id}. {name[:30]} (v{version}) - {status}"
+        button_text = f"{item_id}. {name[:30]} ({client_name} v{client_version}) - {status}"
         buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_configs_{item_id}")])
     
     nav_row = []
@@ -3012,6 +2886,7 @@ async def toggle_vip_configs_page(callback: CallbackQuery):
     await callback.answer()
 
 # ========== РЕДАКТИРОВАНИЕ КЛИЕНТОВ (кратко) ==========
+
 @dp.callback_query(lambda c: c.data == "edit_clients_list")
 async def edit_clients_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3063,6 +2938,7 @@ async def edit_clients_list(callback: CallbackQuery):
     await callback.answer()
 
 # ========== РЕДАКТИРОВАНИЕ РЕСУРСПАКОВ (кратко) ==========
+
 @dp.callback_query(lambda c: c.data == "edit_packs_list")
 async def edit_packs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3114,6 +2990,7 @@ async def edit_packs_list(callback: CallbackQuery):
     await callback.answer()
 
 # ========== ДОБАВЛЕНИЕ КЛИЕНТА (кратко) ==========
+
 @dp.callback_query(lambda c: c.data == "add_client")
 async def add_client_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3133,6 +3010,7 @@ async def add_client_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== ДОБАВЛЕНИЕ РЕСУРСПАКА (кратко) ==========
+
 @dp.callback_query(lambda c: c.data == "add_pack")
 async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3152,7 +3030,8 @@ async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ========== ОБЩИЕ ФУНКЦИИ РЕДАКТИРОВАНИЯ ==========
-@dp.callback_query(lambda c: c.data.startswith("edit_field_"))
+
+@dp.callback_query(lambda c: c.data.startswith("edit_field_") and not c.data.startswith("edit_field_configs_"))
 async def edit_field_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
@@ -3170,11 +3049,6 @@ async def edit_field_start(callback: CallbackQuery, state: FSMContext):
         'author': 'author',
         'download_url': 'download_url'
     }
-    
-    if category == "configs":
-        # Для конфигов своя обработка
-        await edit_config_field_start(callback, state)
-        return
     
     db_field = field_map.get(field)
     if not db_field:
@@ -3215,6 +3089,7 @@ async def edit_value(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка при обновлении", reply_markup=get_main_keyboard(is_admin=True))
 
 # ========== РЕДАКТИРОВАНИЕ МЕДИА ==========
+
 @dp.callback_query(lambda c: c.data.startswith("edit_media_"))
 async def edit_media_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
@@ -3230,7 +3105,6 @@ async def edit_media_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Элемент не найден", show_alert=True)
         return
     
-    # Индексы для media в разных таблицах
     media_index = 5 if category == "configs" else 3
     
     try:
@@ -3327,6 +3201,7 @@ async def handle_media_edit(message: Message, state: FSMContext):
         await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
 
 # ========== СОХРАНЕНИЕ И ОТМЕНА ИЗМЕНЕНИЙ ==========
+
 @dp.callback_query(lambda c: c.data.startswith("save_edit_"))
 async def save_edit_changes(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -3370,6 +3245,7 @@ async def cancel_edit_changes(callback: CallbackQuery):
     await callback.answer()
 
 # ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
+
 def encode_filename(filename):
     filename_bytes = filename.encode('utf-8')
     encoded = base64.b64encode(filename_bytes).decode('utf-8')
@@ -3766,6 +3642,7 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("❌ Рассылка отменена", reply_markup=get_main_keyboard(is_admin=True))
 
 # ========== ФУНКЦИИ ДЛЯ ПРОСМОТРА МЕДИА ==========
+
 @dp.callback_query(lambda c: c.data.startswith("media_"))
 async def view_media(callback: CallbackQuery, state: FSMContext):
     try:
@@ -3779,7 +3656,6 @@ async def view_media(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Не найден", show_alert=True)
             return
         
-        # Индекс media в разных таблицах
         media_index = 5 if category == "configs" else 3
         
         try:
@@ -3881,7 +3757,7 @@ async def main():
     print("   • 📢 Рассылка")
     print("   • 🔍 Диагностика БД (/check_db, /debug_admin)")
     print("   • 🔄 Редактирование через временную БД")
-    print("   • ⚙️ Конфиги привязаны к клиентам")
+    print("   • ⚙️ Конфиги привязаны к названиям клиентов")
     print("="*50)
     
     # Проверяем данные при запуске
