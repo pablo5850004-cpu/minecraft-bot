@@ -1043,6 +1043,7 @@ def update_config_media(item_id: int, media_list: list):
         return False
 
 def add_client(name, full_desc, url, version, is_vip=0, media=None):
+    """Добавляет клиента во временную БД"""
     try:
         if not TEMP_DB_PATH.exists():
             logger.error("Временная БД не существует")
@@ -1104,6 +1105,7 @@ def update_client_media(item_id: int, media_list: list):
         return False
 
 def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
+    """Добавляет ресурспак во временную БД"""
     try:
         if not TEMP_DB_PATH.exists():
             logger.error("Временная БД не существует")
@@ -1267,6 +1269,7 @@ def get_main_keyboard(is_admin=False, is_vip=False):
     return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 class AdminStates(StatesGroup):
+    # Состояния для клиентов
     client_name = State()
     client_full_desc = State()
     client_version = State()
@@ -1274,6 +1277,7 @@ class AdminStates(StatesGroup):
     client_media = State()
     client_vip = State()
     
+    # Состояния для ресурспаков
     pack_name = State()
     pack_full_desc = State()
     pack_version = State()
@@ -1291,6 +1295,7 @@ class AdminStates(StatesGroup):
     config_media = State()
     config_vip = State()
     
+    # Общие состояния
     edit_value = State()
     edit_media = State()
     broadcast_text = State()
@@ -1859,8 +1864,6 @@ async def download_config(callback: CallbackQuery):
     await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{download_url}")
     await callback.answer("✅ Ссылка отправлена!")
 
-# ========== ОСТАЛЬНЫЕ ОБРАБОТЧИКИ ==========
-
 @dp.message(F.text == "💎 VIP")
 async def vip_menu(message: Message):
     user_id = message.from_user.id
@@ -2308,6 +2311,7 @@ async def vip_handle_user_id(message: Message, state: FSMContext):
     await state.clear()
 
 # ========== УПРАВЛЕНИЕ КЛИЕНТАМИ ==========
+
 @dp.callback_query(lambda c: c.data == "admin_clients")
 async def admin_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2354,6 +2358,235 @@ async def admin_configs(callback: CallbackQuery):
     ]
     await callback.message.edit_text("⚙️ Управление конфигами\n\nВыбери действие:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
+
+# ========== ДОБАВЛЕНИЕ КЛИЕНТА (исправленные обработчики) ==========
+
+@dp.callback_query(lambda c: c.data == "add_client")
+async def add_client_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    # Создаем временную копию БД для добавления
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    await state.set_state(AdminStates.client_name)
+    await callback.message.edit_text("📝 Введи название клиента:")
+    await callback.answer()
+
+@dp.message(AdminStates.client_name)
+async def client_name(message: Message, state: FSMContext):
+    await state.update_data(client_name=message.text)
+    await state.set_state(AdminStates.client_full_desc)
+    await message.answer("📚 Введи полное описание клиента:")
+
+@dp.message(AdminStates.client_full_desc)
+async def client_full_desc(message: Message, state: FSMContext):
+    await state.update_data(client_full_desc=message.text)
+    await state.set_state(AdminStates.client_version)
+    await message.answer("🔢 Введи версию (например 1.20.4):")
+
+@dp.message(AdminStates.client_version)
+async def client_version(message: Message, state: FSMContext):
+    await state.update_data(client_version=message.text)
+    await state.set_state(AdminStates.client_url)
+    await message.answer("🔗 Введи ссылку на скачивание:")
+
+@dp.message(AdminStates.client_url)
+async def client_url(message: Message, state: FSMContext):
+    await state.update_data(client_url=message.text)
+    await state.set_state(AdminStates.client_vip)
+    await message.answer("💎 Это VIP клиент?\n\nОтветь 'да' или 'нет':")
+
+@dp.message(AdminStates.client_vip)
+async def client_vip(message: Message, state: FSMContext):
+    is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
+    await state.update_data(client_vip=is_vip)
+    await state.set_state(AdminStates.client_media)
+    await message.answer("🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'пропустить' чтобы пропустить фото:")
+
+@dp.message(AdminStates.client_media)
+async def client_media(message: Message, state: FSMContext):
+    data = await state.get_data()
+    media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        name = data.get('client_name')
+        full_desc = data.get('client_full_desc')
+        version = data.get('client_version')
+        url = data.get('client_url')
+        is_vip = data.get('client_vip', 0)
+        
+        if not version or version.strip() == "":
+            version = "1.20"
+        
+        item_id = add_client(name, full_desc, url, version, is_vip, media_list)
+        await state.clear()
+        
+        if item_id:
+            vip_text = "💎 VIP" if is_vip else "📦 Обычный"
+            await message.answer(
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
+                reply_markup=get_save_cancel_keyboard("clients")
+            )
+            check_all_clients()
+        else:
+            await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.text and message.text.lower() == 'пропустить':
+        name = data.get('client_name')
+        full_desc = data.get('client_full_desc')
+        version = data.get('client_version')
+        url = data.get('client_url')
+        is_vip = data.get('client_vip', 0)
+        
+        if not version or version.strip() == "":
+            version = "1.20"
+        
+        item_id = add_client(name, full_desc, url, version, is_vip, [])
+        await state.clear()
+        
+        if item_id:
+            vip_text = "💎 VIP" if is_vip else "📦 Обычный"
+            await message.answer(
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
+                reply_markup=get_save_cancel_keyboard("clients")
+            )
+            check_all_clients()
+        else:
+            await message.answer("❌ Ошибка при добавлении клиента", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.photo:
+        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=media_list)
+        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nМожешь отправить ещё фото или написать 'готово'")
+    else:
+        await message.answer("❌ Отправь фото, или напиши 'готово' / 'пропустить'")
+
+# ========== ДОБАВЛЕНИЕ РЕСУРСПАКА ==========
+
+@dp.callback_query(lambda c: c.data == "add_pack")
+async def add_pack_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    await state.set_state(AdminStates.pack_name)
+    await callback.message.edit_text("📝 Введи название ресурспака:")
+    await callback.answer()
+
+@dp.message(AdminStates.pack_name)
+async def pack_name(message: Message, state: FSMContext):
+    await state.update_data(pack_name=message.text)
+    await state.set_state(AdminStates.pack_full_desc)
+    await message.answer("📚 Введи полное описание ресурспака:")
+
+@dp.message(AdminStates.pack_full_desc)
+async def pack_full_desc(message: Message, state: FSMContext):
+    await state.update_data(pack_full_desc=message.text)
+    await state.set_state(AdminStates.pack_version)
+    await message.answer("🔢 Введи версию (например 1.20.4):")
+
+@dp.message(AdminStates.pack_version)
+async def pack_version(message: Message, state: FSMContext):
+    await state.update_data(pack_version=message.text)
+    await state.set_state(AdminStates.pack_author)
+    await message.answer("✍️ Введи автора ресурспака:")
+
+@dp.message(AdminStates.pack_author)
+async def pack_author(message: Message, state: FSMContext):
+    await state.update_data(pack_author=message.text)
+    await state.set_state(AdminStates.pack_url)
+    await message.answer("🔗 Введи ссылку на скачивание:")
+
+@dp.message(AdminStates.pack_url)
+async def pack_url(message: Message, state: FSMContext):
+    await state.update_data(pack_url=message.text)
+    await state.set_state(AdminStates.pack_vip)
+    await message.answer("💎 Это VIP ресурспак?\n\nОтветь 'да' или 'нет':")
+
+@dp.message(AdminStates.pack_vip)
+async def pack_vip(message: Message, state: FSMContext):
+    is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
+    await state.update_data(pack_vip=is_vip)
+    await state.set_state(AdminStates.pack_media)
+    await message.answer("🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'пропустить' чтобы пропустить фото:")
+
+@dp.message(AdminStates.pack_media)
+async def pack_media(message: Message, state: FSMContext):
+    data = await state.get_data()
+    media_list = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        name = data.get('pack_name')
+        full_desc = data.get('pack_full_desc')
+        version = data.get('pack_version')
+        author = data.get('pack_author')
+        url = data.get('pack_url')
+        is_vip = data.get('pack_vip', 0)
+        
+        if not version or version.strip() == "":
+            version = "1.20"
+        
+        item_id = add_pack(name, full_desc, url, version, author, is_vip, media_list)
+        await state.clear()
+        
+        if item_id:
+            vip_text = "💎 VIP" if is_vip else "📦 Обычный"
+            await message.answer(
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
+                reply_markup=get_save_cancel_keyboard("packs")
+            )
+        else:
+            await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.text and message.text.lower() == 'пропустить':
+        name = data.get('pack_name')
+        full_desc = data.get('pack_full_desc')
+        version = data.get('pack_version')
+        author = data.get('pack_author')
+        url = data.get('pack_url')
+        is_vip = data.get('pack_vip', 0)
+        
+        if not version or version.strip() == "":
+            version = "1.20"
+        
+        item_id = add_pack(name, full_desc, url, version, author, is_vip, [])
+        await state.clear()
+        
+        if item_id:
+            vip_text = "💎 VIP" if is_vip else "📦 Обычный"
+            await message.answer(
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
+                reply_markup=get_save_cancel_keyboard("packs")
+            )
+        else:
+            await message.answer("❌ Ошибка при добавлении ресурспака", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.photo:
+        media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=media_list)
+        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nМожешь отправить ещё фото или написать 'готово'")
+    else:
+        await message.answer("❌ Отправь фото, или напиши 'готово' / 'пропустить'")
 
 # ========== ДОБАВЛЕНИЕ КОНФИГА ==========
 
@@ -2411,7 +2644,7 @@ async def config_vip(message: Message, state: FSMContext):
     is_vip = 1 if message.text.lower() in ['да', 'yes', '1', 'true'] else 0
     await state.update_data(config_vip=is_vip)
     await state.set_state(AdminStates.config_media)
-    await message.answer("🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши готово\nИли напиши пропустить чтобы пропустить фото:")
+    await message.answer("🖼️ Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'пропустить' чтобы пропустить фото:")
 
 @dp.message(AdminStates.config_media)
 async def config_media(message: Message, state: FSMContext):
@@ -2469,9 +2702,9 @@ async def config_media(message: Message, state: FSMContext):
     if message.photo:
         media_list.append({'type': 'photo', 'id': message.photo[-1].file_id})
         await state.update_data(media_list=media_list)
-        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nМожешь отправить ещё фото или написать готово")
+        await message.answer(f"✅ Фото добавлено! Всего: {len(media_list)}\nМожешь отправить ещё фото или написать 'готово'")
     else:
-        await message.answer("❌ Отправь фото, или напиши готово / пропустить")
+        await message.answer("❌ Отправь фото, или напиши 'готово' / 'пропустить'")
 
 # ========== РЕДАКТИРОВАНИЕ КОНФИГОВ ==========
 
@@ -2885,7 +3118,7 @@ async def toggle_vip_configs_page(callback: CallbackQuery):
     
     await callback.answer()
 
-# ========== РЕДАКТИРОВАНИЕ КЛИЕНТОВ (кратко) ==========
+# ========== РЕДАКТИРОВАНИЕ КЛИЕНТОВ ==========
 
 @dp.callback_query(lambda c: c.data == "edit_clients_list")
 async def edit_clients_list(callback: CallbackQuery):
@@ -2937,7 +3170,84 @@ async def edit_clients_list(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== РЕДАКТИРОВАНИЕ РЕСУРСПАКОВ (кратко) ==========
+@dp.callback_query(lambda c: c.data.startswith("edit_clients_page_"))
+async def edit_clients_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.replace("edit_clients_page_", ""))
+    items, total = get_all_items_paginated("clients", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет клиентов для редактирования", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"edit_item_clients_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"edit_clients_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"edit_clients_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование клиентов (стр {page}/{total_pages}):\n\nВыбери клиента для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_item_clients_"))
+async def edit_client_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("edit_item_clients_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("clients", item_id, use_temp=True)
+    if not item:
+        await callback.answer("❌ Клиент не найден", show_alert=True)
+        return
+    
+    try:
+        media_list = json.loads(item[3]) if item[3] else []
+        media_count = len(media_list)
+    except:
+        media_count = 0
+    
+    is_vip = item[6] == 1 if len(item) > 6 else 0
+    
+    await state.update_data(edit_item_id=item_id, edit_category="clients")
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование клиента: {item[1]}\n\nЧто изменить?",
+        reply_markup=get_edit_item_keyboard("clients", item_id, media_count, is_vip)
+    )
+    await callback.answer()
+
+# ========== РЕДАКТИРОВАНИЕ РЕСУРСПАКОВ ==========
 
 @dp.callback_query(lambda c: c.data == "edit_packs_list")
 async def edit_packs_list(callback: CallbackQuery):
@@ -2989,44 +3299,81 @@ async def edit_packs_list(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ========== ДОБАВЛЕНИЕ КЛИЕНТА (кратко) ==========
-
-@dp.callback_query(lambda c: c.data == "add_client")
-async def add_client_start(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(lambda c: c.data.startswith("edit_packs_page_"))
+async def edit_packs_page(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
-        )
-        await callback.answer()
-        return
+    page = int(callback.data.replace("edit_packs_page_", ""))
+    items, total = get_all_items_paginated("resourcepacks", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
     
-    await state.set_state(AdminStates.client_name)
-    await callback.message.edit_text("📝 Введи название клиента:")
-    await callback.answer()
-
-# ========== ДОБАВЛЕНИЕ РЕСУРСПАКА (кратко) ==========
-
-@dp.callback_query(lambda c: c.data == "add_pack")
-async def add_pack_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
+    if not items:
         await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
+            "📭 Нет ресурспаков для редактирования", 
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
         )
         await callback.answer()
         return
     
-    await state.set_state(AdminStates.pack_name)
-    await callback.message.edit_text("📝 Введи название ресурспака:")
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"edit_item_packs_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"edit_packs_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"edit_packs_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование ресурспаков (стр {page}/{total_pages}):\n\nВыбери ресурспак для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("edit_item_packs_"))
+async def edit_pack_select(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("edit_item_packs_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("resourcepacks", item_id, use_temp=True)
+    if not item:
+        await callback.answer("❌ Ресурспак не найден", show_alert=True)
+        return
+    
+    try:
+        media_list = json.loads(item[3]) if item[3] else []
+        media_count = len(media_list)
+    except:
+        media_count = 0
+    
+    is_vip = item[7] == 1 if len(item) > 7 else 0
+    
+    await state.update_data(edit_item_id=item_id, edit_category="packs")
+    
+    await callback.message.edit_text(
+        f"✏️ Редактирование ресурспака: {item[1]}\n\nЧто изменить?",
+        reply_markup=get_edit_item_keyboard("packs", item_id, media_count, is_vip)
+    )
     await callback.answer()
 
 # ========== ОБЩИЕ ФУНКЦИИ РЕДАКТИРОВАНИЯ ==========
@@ -3199,6 +3546,502 @@ async def handle_media_edit(message: Message, state: FSMContext):
         await message.answer(f"✅ Фото добавлено во временную БД! Всего: {len(current_media)}\nМожешь отправить ещё фото или написать 'готово'")
     else:
         await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
+
+# ========== УДАЛЕНИЕ КЛИЕНТОВ ==========
+
+@dp.callback_query(lambda c: c.data == "delete_clients_list")
+async def delete_clients_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    items, total = get_all_items_paginated("clients", 1, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет клиентов для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_clients_{item_id}")])
+    
+    if total_pages > 1:
+        nav_row = []
+        nav_row.append(InlineKeyboardButton(text=f"1/{total_pages}", callback_data="noop"))
+        if 1 < total_pages:
+            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"delete_clients_page_2"))
+        if nav_row:
+            buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери клиента для удаления (всего: {total}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_clients_page_"))
+async def delete_clients_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.replace("delete_clients_page_", ""))
+    items, total = get_all_items_paginated("clients", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет клиентов для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_clients_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"delete_clients_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"delete_clients_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери клиента для удаления (стр {page}/{total_pages}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_clients_") and not c.data.startswith("delete_item_clients_confirm_"))
+async def delete_client_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_clients_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("clients", item_id, use_temp=True)
+    if not item:
+        await callback.answer("❌ Клиент не найден", show_alert=True)
+        return
+    
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_clients_confirm_{item_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_clients_list")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить клиента:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_clients_confirm_"))
+async def delete_client_execute(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_clients_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    success = delete_item_from_temp("clients", item_id)
+    
+    if success:
+        await callback.answer("✅ Клиент удален из временной БД!", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении!", show_alert=True)
+    
+    await delete_clients_list(callback)
+
+# ========== УДАЛЕНИЕ РЕСУРСПАКОВ ==========
+
+@dp.callback_query(lambda c: c.data == "delete_packs_list")
+async def delete_packs_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    items, total = get_all_items_paginated("resourcepacks", 1, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет ресурспаков для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_packs_{item_id}")])
+    
+    if total_pages > 1:
+        nav_row = []
+        nav_row.append(InlineKeyboardButton(text=f"1/{total_pages}", callback_data="noop"))
+        if 1 < total_pages:
+            nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"delete_packs_page_2"))
+        if nav_row:
+            buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери ресурспак для удаления (всего: {total}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_packs_page_"))
+async def delete_packs_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.replace("delete_packs_page_", ""))
+    items, total = get_all_items_paginated("resourcepacks", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет ресурспаков для удаления", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        vip_icon = "💎 " if is_vip else ""
+        button_text = f"{item_id}. {vip_icon}{name[:30]} ({version}) 📥 {downloads}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"delete_item_packs_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"delete_packs_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"delete_packs_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
+    
+    await callback.message.edit_text(
+        f"🗑 Выбери ресурспак для удаления (стр {page}/{total_pages}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_packs_") and not c.data.startswith("delete_item_packs_confirm_"))
+async def delete_pack_confirm(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_packs_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    item = get_item("resourcepacks", item_id, use_temp=True)
+    if not item:
+        await callback.answer("❌ Ресурспак не найден", show_alert=True)
+        return
+    
+    buttons = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_item_packs_confirm_{item_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="delete_packs_list")]
+    ]
+    
+    await callback.message.edit_text(
+        f"⚠️ Подтверждение удаления\n\nТы действительно хочешь удалить ресурспак:\n{item[1]} (ID: {item_id})?\n\nЭто действие нельзя отменить!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("delete_item_packs_confirm_"))
+async def delete_pack_execute(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        item_id = int(callback.data.replace("delete_item_packs_confirm_", ""))
+    except ValueError:
+        await callback.answer("❌ Неверный ID", show_alert=True)
+        return
+    
+    success = delete_item_from_temp("resourcepacks", item_id)
+    
+    if success:
+        await callback.answer("✅ Ресурспак удален из временной БД!", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении!", show_alert=True)
+    
+    await delete_packs_list(callback)
+
+# ========== ПЕРЕКЛЮЧЕНИЕ VIP ДЛЯ КЛИЕНТОВ ==========
+
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_clients"))
+async def toggle_vip_clients(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    if len(parts) == 3:
+        items, total = get_all_items_paginated("clients", 1, 50, use_temp=True)
+        total_pages = max(1, (total + 49) // 50)
+        
+        if not items:
+            await callback.message.edit_text(
+                "📭 Нет клиентов для переключения VIP", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+            )
+            await callback.answer()
+            return
+        
+        buttons = []
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
+            status = "💎 VIP" if is_vip else "🔘 Обычный"
+            button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_clients_{item_id}")])
+        
+        if total_pages > 1:
+            nav_row = []
+            nav_row.append(InlineKeyboardButton(text=f"1/{total_pages}", callback_data="noop"))
+            if 1 < total_pages:
+                nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_clients_page_2"))
+            if nav_row:
+                buttons.append(nav_row)
+        
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
+        
+        await callback.message.edit_text(
+            f"💎 Переключение VIP статуса для клиентов\n\nВыбери клиента:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    
+    elif len(parts) >= 4:
+        item_id = int(parts[3])
+        new_status = toggle_vip_in_temp("clients", item_id)
+        
+        if new_status:
+            await callback.answer("✅ Клиент теперь VIP во временной БД!", show_alert=True)
+        else:
+            await callback.answer("✅ Клиент теперь обычный во временной БД!", show_alert=True)
+        
+        await toggle_vip_clients(callback)
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_clients_page_"))
+async def toggle_vip_clients_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.replace("toggle_vip_clients_page_", ""))
+    items, total = get_all_items_paginated("clients", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет клиентов для переключения VIP", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        status = "💎 VIP" if is_vip else "🔘 Обычный"
+        button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_clients_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"toggle_vip_clients_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_clients_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
+    
+    await callback.message.edit_text(
+        f"💎 Переключение VIP статуса для клиентов (стр {page}/{total_pages})\n\nВыбери клиента:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    
+    await callback.answer()
+
+# ========== ПЕРЕКЛЮЧЕНИЕ VIP ДЛЯ РЕСУРСПАКОВ ==========
+
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_packs"))
+async def toggle_vip_packs(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    if len(parts) == 3:
+        items, total = get_all_items_paginated("resourcepacks", 1, 50, use_temp=True)
+        total_pages = max(1, (total + 49) // 50)
+        
+        if not items:
+            await callback.message.edit_text(
+                "📭 Нет ресурспаков для переключения VIP", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+            )
+            await callback.answer()
+            return
+        
+        buttons = []
+        for item in items:
+            item_id, name, full_desc, media_json, downloads, version, is_vip = item
+            status = "💎 VIP" if is_vip else "🔘 Обычный"
+            button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+            buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_packs_{item_id}")])
+        
+        if total_pages > 1:
+            nav_row = []
+            nav_row.append(InlineKeyboardButton(text=f"1/{total_pages}", callback_data="noop"))
+            if 1 < total_pages:
+                nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_packs_page_2"))
+            if nav_row:
+                buttons.append(nav_row)
+        
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
+        
+        await callback.message.edit_text(
+            f"💎 Переключение VIP статуса для ресурспаков\n\nВыбери ресурспак:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    
+    elif len(parts) >= 4:
+        item_id = int(parts[3])
+        new_status = toggle_vip_in_temp("resourcepacks", item_id)
+        
+        if new_status:
+            await callback.answer("✅ Ресурспак теперь VIP во временной БД!", show_alert=True)
+        else:
+            await callback.answer("✅ Ресурспак теперь обычный во временной БД!", show_alert=True)
+        
+        await toggle_vip_packs(callback)
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("toggle_vip_packs_page_"))
+async def toggle_vip_packs_page(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    page = int(callback.data.replace("toggle_vip_packs_page_", ""))
+    items, total = get_all_items_paginated("resourcepacks", page, 50, use_temp=True)
+    total_pages = max(1, (total + 49) // 50)
+    
+    if not items:
+        await callback.message.edit_text(
+            "📭 Нет ресурспаков для переключения VIP", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
+        )
+        await callback.answer()
+        return
+    
+    buttons = []
+    for item in items:
+        item_id, name, full_desc, media_json, downloads, version, is_vip = item
+        status = "💎 VIP" if is_vip else "🔘 Обычный"
+        button_text = f"{item_id}. {name[:30]} ({version}) - {status}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"toggle_vip_packs_{item_id}")])
+    
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"toggle_vip_packs_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"toggle_vip_packs_page_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
+    
+    await callback.message.edit_text(
+        f"💎 Переключение VIP статуса для ресурспаков (стр {page}/{total_pages})\n\nВыбери ресурспак:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    
+    await callback.answer()
 
 # ========== СОХРАНЕНИЕ И ОТМЕНА ИЗМЕНЕНИЙ ==========
 
