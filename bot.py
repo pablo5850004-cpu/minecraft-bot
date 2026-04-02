@@ -106,7 +106,7 @@ def init_db():
             cur.execute("PRAGMA table_info(configs)")
             columns = [col[1] for col in cur.fetchall()]
             
-            # Если таблица имеет старую структуру, пересоздаем её
+            # Если таблица имеет старую структуру, пересоздаём её
             if 'client_name' not in columns:
                 print("🔄 Обнаружена старая версия таблицы configs, обновляем...")
                 # Создаем временную таблицу
@@ -171,69 +171,8 @@ def init_db():
         conn.commit()
         conn.close()
         print("✅ База данных клиентов готова")
-        
-        # Добавляем тестовые данные, если таблицы пустые
-        add_test_data_if_empty()
     except Exception as e:
         print(f"❌ Ошибка при создании базы клиентов: {e}")
-
-def add_test_data_if_empty():
-    """Добавляет тестовые данные, если таблицы пустые"""
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        
-        # Проверяем clients
-        cur.execute("SELECT COUNT(*) FROM clients")
-        if cur.fetchone()[0] == 0:
-            print("📝 Добавляю тестовые данные в clients...")
-            cur.execute('''
-                INSERT INTO clients (name, full_desc, download_url, version, is_vip, downloads) 
-                VALUES 
-                ('Vanilla Client', 'Обычный ванильный клиент Minecraft', 'https://example.com/vanilla', '1.20.4', 0, 100),
-                ('OptiFine Client', 'Клиент с OptiFine для лучшей производительности', 'https://example.com/optifine', '1.20.4', 0, 200),
-                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50),
-                ('Lunar Client', 'Популярный PvP клиент', 'https://example.com/lunar', '1.16.5', 0, 300),
-                ('Badlion Client', 'Клиент для PvP с античитами', 'https://example.com/badlion', '1.16.5', 0, 250),
-                ('VIP PvP Client', 'Премиум PvP клиент', 'https://example.com/vip-pvp', '1.16.5', 1, 75)
-            ''')
-            conn.commit()
-            print("✅ Тестовые данные добавлены в clients")
-        
-        # Проверяем resourcepacks
-        cur.execute("SELECT COUNT(*) FROM resourcepacks")
-        if cur.fetchone()[0] == 0:
-            print("📝 Добавляю тестовые данные в resourcepacks...")
-            cur.execute('''
-                INSERT INTO resourcepacks (name, full_desc, download_url, version, author, is_vip, downloads) 
-                VALUES 
-                ('Faithful', 'Классический ресурспак в стиле vanilla', 'https://example.com/faithful', '1.20.4', 'Faithful Team', 0, 500),
-                ('VIP Texture Pack', 'Эксклюзивный ресурспак для VIP', 'https://example.com/vip', '1.20.4', 'VIP Creator', 1, 30)
-            ''')
-            conn.commit()
-            print("✅ Тестовые данные добавлены в resourcepacks")
-        
-        # Проверяем configs
-        cur.execute("SELECT COUNT(*) FROM configs")
-        if cur.fetchone()[0] == 0:
-            print("📝 Добавляю тестовые данные в configs...")
-            cur.execute('''
-                INSERT INTO configs (client_name, client_version, name, full_desc, download_url, is_vip, downloads) 
-                VALUES 
-                ('OptiFine', '1.20.4', 'OptiFine High Settings', 'Высокие настройки графики для OptiFine', 'https://example.com/optifine-high', 0, 120),
-                ('OptiFine', '1.20.4', 'OptiFine Low Settings', 'Низкие настройки для слабых ПК', 'https://example.com/optifine-low', 0, 85),
-                ('OptiFine', '1.16.5', 'OptiFine Settings 1.16', 'Настройки для версии 1.16.5', 'https://example.com/optifine-116', 0, 45),
-                ('Lunar Client', '1.20.4', 'Lunar PvP Settings', 'PvP настройки для Lunar Client', 'https://example.com/lunar-pvp', 1, 200),
-                ('Lunar Client', '1.16.5', 'Lunar Settings', 'Базовые настройки Lunar', 'https://example.com/lunar', 0, 150),
-                ('Badlion', '1.20.4', 'Badlion Performance', 'Настройки для максимального FPS', 'https://example.com/badlion-perf', 0, 90),
-                ('VIP Client', '1.20.4', 'VIP Config Premium', 'Эксклюзивные настройки для VIP', 'https://example.com/vip-config', 1, 30)
-            ''')
-            conn.commit()
-            print("✅ Тестовые данные добавлены в configs")
-        
-        conn.close()
-    except Exception as e:
-        print(f"❌ Ошибка при добавлении тестовых данных: {e}")
 
 def init_users_db():
     try:
@@ -731,28 +670,15 @@ def get_all_items_paginated(table: str, page: int = 1, per_page: int = 10, vip_f
                 cur.execute('SELECT id, name, full_desc, media, downloads, version, 0 as is_vip FROM resourcepacks ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
         
         elif table == "configs":
-            # Проверяем наличие колонок client_name и client_version
-            if 'client_name' in columns and 'client_version' in columns:
-                if has_vip:
-                    if vip_filter == "vip":
-                        cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 1 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
-                    elif vip_filter == "regular":
-                        cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 0 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
-                    else:
-                        cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+            if has_vip:
+                if vip_filter == "vip":
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 1 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                elif vip_filter == "regular":
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 0 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
                 else:
-                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, 0 as is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                    cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
             else:
-                # Старая структура - используем name как client_name
-                if has_vip:
-                    if vip_filter == "vip":
-                        cur.execute('SELECT id, name, version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 1 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
-                    elif vip_filter == "regular":
-                        cur.execute('SELECT id, name, version, name, full_desc, media, downloads, is_vip FROM configs WHERE is_vip = 0 ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
-                    else:
-                        cur.execute('SELECT id, name, version, name, full_desc, media, downloads, is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
-                else:
-                    cur.execute('SELECT id, name, version, name, full_desc, media, downloads, 0 as is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
+                cur.execute('SELECT id, client_name, client_version, name, full_desc, media, downloads, 0 as is_vip FROM configs ORDER BY id DESC LIMIT ? OFFSET ?', (per_page, offset))
         
         items = cur.fetchall()
         
@@ -1063,21 +989,10 @@ def add_config(client_name: str, client_version: str, name: str, full_desc: str,
             media = []
         media_json = json.dumps(media)
         
-        # Проверяем структуру таблицы configs
-        cur.execute("PRAGMA table_info(configs)")
-        columns = [col[1] for col in cur.fetchall()]
-        
-        if 'client_name' in columns and 'client_version' in columns:
-            cur.execute('''
-                INSERT INTO configs (client_name, client_version, name, full_desc, download_url, is_vip, media) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (client_name, client_version, name, full_desc, url, is_vip, media_json))
-        else:
-            # Старая структура - добавляем без client_name
-            cur.execute('''
-                INSERT INTO configs (name, full_desc, download_url, version, is_vip, media) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (name, full_desc, url, client_version, is_vip, media_json))
+        cur.execute('''
+            INSERT INTO configs (client_name, client_version, name, full_desc, download_url, is_vip, media) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (client_name, client_version, name, full_desc, url, is_vip, media_json))
         
         conn.commit()
         item_id = cur.lastrowid
@@ -1399,7 +1314,6 @@ def get_items_keyboard(items, category, page, total_pages, show_vip=False):
             if len(item) >= 8:
                 item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item[:8]
             else:
-                # Старая структура для обратной совместимости
                 item_id, name, version, name2, full_desc, media_json, downloads, is_vip = item
                 client_name = name
                 client_version = version
@@ -1495,7 +1409,7 @@ def get_admin_list_keyboard(items, category, page, total_pages, action):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
-    """Создает клавиатуру для редактирования элемента"""
+    """Создает клавиатуру для редактирования элемента с кнопкой сохранения"""
     vip_status = "💎 VIP" if is_vip else "🔘 Обычный"
     
     if category == "clients":
@@ -1506,8 +1420,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     elif category == "packs":
@@ -1519,8 +1433,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     else:  # configs
@@ -1532,8 +1446,8 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
             [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
-            [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
-            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
+            [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
+            [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
         ]
     
@@ -1550,8 +1464,8 @@ def get_edit_media_keyboard(category, item_id):
 def get_save_cancel_keyboard(category):
     """Клавиатура для сохранения/отмены изменений после добавления"""
     buttons = [
-        [InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_{category}")],
-        [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
+        [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
+        [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
         [InlineKeyboardButton(text="◀️ Назад в админку", callback_data=f"admin_{category}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -1961,8 +1875,6 @@ async def download_config(callback: CallbackQuery):
     await callback.message.answer(f"📥 Скачать {vip_prefix}{name}\n\n{download_url}")
     await callback.answer("✅ Ссылка отправлена!")
 
-# ========== ОСТАЛЬНЫЕ ОБРАБОТЧИКИ ==========
-
 @dp.message(F.text == "💎 VIP")
 async def vip_menu(message: Message):
     user_id = message.from_user.id
@@ -2301,12 +2213,29 @@ async def help_command(message: Message):
 
 @dp.callback_query(lambda c: c.data == "help_rules")
 async def help_rules(callback: CallbackQuery):
-    await callback.message.edit_text("📋 Правила использования\n\n1. Все файлы предоставляются 'как есть'\n2. Автор не несёт ответственности за использование файлов\n3. Уважайте других пользователей\n4. VIP контент доступен только после покупки", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]]))
+    await callback.message.edit_text(
+        "📋 ПРАВИЛА ИСПОЛЬЗОВАНИЯ\n\n"
+        "1. Администратор не несёт ответственность за файлы в боте\n\n"
+        "2. Подозрительные файлы помечены\n\n"
+        "3. Всегда внимательно читайте инструкции и описание, чтобы не допустить ошибок или в худшем случае словить вирус\n\n"
+        "4. VIP контент предоставляется только после покупки\n\n"
+        "5. Все файлы предоставляются 'как есть'",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
+    )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "help_faq")
 async def help_faq(callback: CallbackQuery):
-    await callback.message.edit_text("❓ Часто задаваемые вопросы\n\nQ: Как скачать файл?\nA: Нажми на элемент, затем кнопку 'Скачать'\n\nQ: Что такое VIP контент?\nA: Это эксклюзивные файлы, отмеченные значком 💎\n\nQ: Как получить VIP?\nA: Свяжись с админом в разделе 💎 VIP\n\nQ: Как сделать бэкап?\nA: В админ-панели выбери '📦 ZIP Бэкапы' и нажми 'Создать'", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]]))
+    await callback.message.edit_text(
+        "❓ ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ\n\n"
+        "Q: Как скачать файл?\n"
+        "A: Нажми на элемент, затем кнопку 'Скачать'\n\n"
+        "Q: Что такое VIP контент?\n"
+        "A: Это эксклюзивные файлы, отмеченные значком 💎\n\n"
+        "Q: Как получить VIP?\n"
+        "A: Свяжись с админом в разделе 💎 VIP",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_help")]])
+    )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "back_to_help")
@@ -2395,10 +2324,11 @@ async def vip_handle_user_id(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     action = data.get('vip_action', 'add')
+    
     if action == 'add':
         success = set_user_vip(user_id, ADMIN_ID)
         if success:
-            await message.answer(f"✅ VIP статус выдан пользователю {user_id}!")
+            await message.answer(f"✅ VIP статус выдан пользователю {user_id}!\n\nСпасибо за ваше доверие!")
         else:
             await message.answer("❌ Ошибка при выдаче VIP статуса")
     else:
@@ -2538,7 +2468,7 @@ async def config_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nДобавлено фото: {len(media_list)}",
                 reply_markup=get_save_cancel_keyboard("configs")
             )
         else:
@@ -2562,7 +2492,7 @@ async def config_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Конфиг добавлен во временную БД!\nID: {item_id}\nДля клиента: {client_name} (версия {client_version})\n{vip_text}\nБез фото",
                 reply_markup=get_save_cancel_keyboard("configs")
             )
         else:
@@ -2649,7 +2579,7 @@ async def client_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
                 reply_markup=get_save_cancel_keyboard("clients")
             )
             check_all_clients()
@@ -2673,7 +2603,7 @@ async def client_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Клиент добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
                 reply_markup=get_save_cancel_keyboard("clients")
             )
             check_all_clients()
@@ -2767,7 +2697,7 @@ async def pack_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nДобавлено фото: {len(media_list)}",
                 reply_markup=get_save_cancel_keyboard("packs")
             )
         else:
@@ -2791,7 +2721,7 @@ async def pack_media(message: Message, state: FSMContext):
         if item_id:
             vip_text = "💎 VIP" if is_vip else "📦 Обычный"
             await message.answer(
-                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!",
+                f"✅ Ресурспак добавлен во временную БД!\nID: {item_id}\n{vip_text}\nВерсия: {version}\nБез фото",
                 reply_markup=get_save_cancel_keyboard("packs")
             )
         else:
@@ -2854,8 +2784,8 @@ async def edit_configs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -2903,8 +2833,8 @@ async def edit_configs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3034,8 +2964,8 @@ async def delete_configs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3083,8 +3013,8 @@ async def delete_configs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3194,8 +3124,8 @@ async def toggle_vip_configs(callback: CallbackQuery):
             if nav_row:
                 buttons.append(nav_row)
         
-        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
         
         await callback.message.edit_text(
@@ -3256,8 +3186,8 @@ async def toggle_vip_configs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_configs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_configs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_configs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")])
     
     await callback.message.edit_text(
@@ -3309,8 +3239,8 @@ async def edit_clients_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -3353,8 +3283,8 @@ async def edit_clients_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -3438,8 +3368,8 @@ async def edit_packs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -3482,8 +3412,8 @@ async def edit_packs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -3580,7 +3510,7 @@ async def edit_value(message: Message, state: FSMContext):
     await state.clear()
     
     if success:
-        await message.answer("✅ Значение обновлено во временной БД!\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!", reply_markup=get_main_keyboard(is_admin=True))
+        await message.answer("✅ Значение обновлено во временной БД!\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
     else:
         await message.answer("❌ Ошибка при обновлении", reply_markup=get_main_keyboard(is_admin=True))
 
@@ -3680,7 +3610,7 @@ async def handle_media_edit(message: Message, state: FSMContext):
         
         await state.clear()
         if success:
-            await message.answer(f"✅ Фото сохранено во временной БД! Всего: {len(current_media)}\n\nНе забудь сохранить изменения кнопкой 'Сохранить и выйти' в админке!", reply_markup=get_main_keyboard(is_admin=True))
+            await message.answer(f"✅ Фото сохранено во временной БД! Всего: {len(current_media)}\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
         else:
             await message.answer("❌ Ошибка при сохранении фото", reply_markup=get_main_keyboard(is_admin=True))
         return
@@ -3739,8 +3669,8 @@ async def delete_clients_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -3783,8 +3713,8 @@ async def delete_clients_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -3884,8 +3814,8 @@ async def delete_packs_list(callback: CallbackQuery):
         if nav_row:
             buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -3928,8 +3858,8 @@ async def delete_packs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
@@ -4023,8 +3953,8 @@ async def toggle_vip_clients(callback: CallbackQuery):
             if nav_row:
                 buttons.append(nav_row)
         
-        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
         
         await callback.message.edit_text(
@@ -4079,8 +4009,8 @@ async def toggle_vip_clients_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_clients")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_clients")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_clients")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")])
     
     await callback.message.edit_text(
@@ -4126,8 +4056,8 @@ async def toggle_vip_packs(callback: CallbackQuery):
             if nav_row:
                 buttons.append(nav_row)
         
-        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+        buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+        buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
         buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
         
         await callback.message.edit_text(
@@ -4182,8 +4112,8 @@ async def toggle_vip_packs_page(callback: CallbackQuery):
     if nav_row:
         buttons.append(nav_row)
     
-    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"save_edit_packs")])
-    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_packs")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_packs")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")])
     
     await callback.message.edit_text(
