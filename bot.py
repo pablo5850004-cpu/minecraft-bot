@@ -97,66 +97,22 @@ def init_db():
             )
         ''')
         
-        # Проверяем существование таблицы configs
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='configs'")
-        table_exists = cur.fetchone()
-        
-        if table_exists:
-            # Проверяем структуру существующей таблицы
-            cur.execute("PRAGMA table_info(configs)")
-            columns = [col[1] for col in cur.fetchall()]
-            
-            # Если таблица имеет старую структуру, пересоздаём её
-            if 'client_name' not in columns:
-                print("🔄 Обнаружена старая версия таблицы configs, обновляем...")
-                # Создаем временную таблицу
-                cur.execute('''
-                    CREATE TABLE configs_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        client_name TEXT NOT NULL,
-                        client_version TEXT NOT NULL,
-                        name TEXT NOT NULL,
-                        full_desc TEXT NOT NULL,
-                        media TEXT DEFAULT '[]',
-                        download_url TEXT NOT NULL,
-                        is_vip INTEGER DEFAULT 0,
-                        downloads INTEGER DEFAULT 0,
-                        views INTEGER DEFAULT 0,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-                
-                # Копируем данные из старой таблицы, если они есть
-                try:
-                    cur.execute('''
-                        INSERT INTO configs_new (id, name, full_desc, media, download_url, is_vip, downloads, views, created_at)
-                        SELECT id, name, full_desc, media, download_url, is_vip, downloads, views, created_at FROM configs
-                    ''')
-                except:
-                    pass
-                
-                # Удаляем старую таблицу и переименовываем новую
-                cur.execute("DROP TABLE configs")
-                cur.execute("ALTER TABLE configs_new RENAME TO configs")
-                print("✅ Таблица configs обновлена")
-        else:
-            # Создаем новую таблицу
-            cur.execute('''
-                CREATE TABLE configs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_name TEXT NOT NULL,
-                    client_version TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    full_desc TEXT NOT NULL,
-                    media TEXT DEFAULT '[]',
-                    download_url TEXT NOT NULL,
-                    is_vip INTEGER DEFAULT 0,
-                    downloads INTEGER DEFAULT 0,
-                    views INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            print("✅ Таблица configs создана")
+        # Таблица конфигов
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                client_version TEXT NOT NULL,
+                name TEXT NOT NULL,
+                full_desc TEXT NOT NULL,
+                media TEXT DEFAULT '[]',
+                download_url TEXT NOT NULL,
+                is_vip INTEGER DEFAULT 0,
+                downloads INTEGER DEFAULT 0,
+                views INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         # Таблица избранного
         cur.execute('''
@@ -171,8 +127,41 @@ def init_db():
         conn.commit()
         conn.close()
         print("✅ База данных клиентов готова")
+        
+        # Добавляем только клиентов
+        add_test_clients_only()
     except Exception as e:
         print(f"❌ Ошибка при создании базы клиентов: {e}")
+
+def add_test_clients_only():
+    """Добавляет только тестовых клиентов, без ресурспаков и конфигов"""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        # Проверяем clients
+        cur.execute("SELECT COUNT(*) FROM clients")
+        if cur.fetchone()[0] == 0:
+            print("📝 Добавляю тестовые данные в clients...")
+            cur.execute('''
+                INSERT INTO clients (name, full_desc, download_url, version, is_vip, downloads) 
+                VALUES 
+                ('Vanilla Client', 'Обычный ванильный клиент Minecraft', 'https://example.com/vanilla', '1.20.4', 0, 100),
+                ('OptiFine Client', 'Клиент с OptiFine для лучшей производительности', 'https://example.com/optifine', '1.20.4', 0, 200),
+                ('VIP Client', 'Эксклюзивный VIP клиент с премиум функциями', 'https://example.com/vip', '1.20.4', 1, 50)
+            ''')
+            conn.commit()
+            print("✅ Тестовые данные добавлены в clients")
+        
+        # resourcepacks и configs оставляем пустыми
+        cur.execute("DELETE FROM resourcepacks")
+        cur.execute("DELETE FROM configs")
+        conn.commit()
+        print("✅ Таблицы resourcepacks и configs очищены")
+        
+        conn.close()
+    except Exception as e:
+        print(f"❌ Ошибка при добавлении тестовых данных: {e}")
 
 def init_users_db():
     try:
@@ -254,7 +243,7 @@ def apply_temp_db_changes():
         # Заменяем основную БД временной
         if TEMP_DB_PATH.exists():
             shutil.copy2(TEMP_DB_PATH, DB_PATH)
-            TEMP_DB_PATH.unlink()  # Удаляем временную копию
+            TEMP_DB_PATH.unlink()
             logger.info(f"✅ Изменения применены, создан бэкап: {backup_path}")
             return True
         return False
@@ -719,7 +708,7 @@ def delete_item_from_temp(table: str, item_id: int):
         logger.info(f"✅ Элемент ID {item_id} удален из временной БД (таблица {table})")
         return True
     except Exception as e:
-        logger.error(f"Ошибка удаления элемента из временной БД: {e}")
+        logger.error(f"❌ Ошибка удаления элемента из временной БД: {e}")
         return False
 
 def update_item_in_temp(table: str, item_id: int, field: str, value):
@@ -737,7 +726,7 @@ def update_item_in_temp(table: str, item_id: int, field: str, value):
         logger.info(f"✅ Поле {field} элемента ID {item_id} обновлено во временной БД")
         return True
     except Exception as e:
-        logger.error(f"Ошибка обновления элемента во временной БД: {e}")
+        logger.error(f"❌ Ошибка обновления элемента во временной БД: {e}")
         return False
 
 def toggle_vip_in_temp(table: str, item_id: int):
@@ -768,7 +757,7 @@ def toggle_vip_in_temp(table: str, item_id: int):
         conn.close()
         return False
     except Exception as e:
-        logger.error(f"Ошибка переключения VIP статуса во временной БД: {e}")
+        logger.error(f"❌ Ошибка переключения VIP статуса во временной БД: {e}")
         return False
 
 def get_clients_by_version(version, page=1, per_page=10, user_id=None):
@@ -912,7 +901,7 @@ def get_all_pack_versions(user_id=None):
         logger.error(f"Ошибка получения версий ресурспаков: {e}")
         return []
 
-# ========== НОВЫЕ ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
+# ========== ФУНКЦИИ ДЛЯ КОНФИГОВ ==========
 
 def get_all_config_clients():
     """Получает список уникальных клиентов, для которых есть конфиги"""
@@ -1000,7 +989,7 @@ def add_config(client_name: str, client_version: str, name: str, full_desc: str,
         logger.info(f"✅ Конфиг добавлен во временную БД: ID={item_id}, name={name}")
         return item_id
     except Exception as e:
-        logger.error(f"Ошибка добавления конфига: {e}")
+        logger.error(f"❌ Ошибка добавления конфига: {e}")
         return None
 
 def update_config(item_id: int, field: str, value):
@@ -1022,7 +1011,7 @@ def update_config_media(item_id: int, media_list: list):
         conn.close()
         return True
     except Exception as e:
-        logger.error(f"Ошибка обновления медиа конфига {item_id}: {e}")
+        logger.error(f"❌ Ошибка обновления медиа конфига {item_id}: {e}")
         return False
 
 def add_client(name, full_desc, url, version, is_vip=0, media=None):
@@ -1062,7 +1051,7 @@ def add_client(name, full_desc, url, version, is_vip=0, media=None):
         logger.info(f"✅ Клиент добавлен во временную БД: ID={item_id}, name={name}, version='{version}'")
         return item_id
     except Exception as e:
-        logger.error(f"Ошибка добавления клиента: {e}")
+        logger.error(f"❌ Ошибка добавления клиента: {e}")
         return None
 
 def update_client(item_id, field, value):
@@ -1084,7 +1073,7 @@ def update_client_media(item_id: int, media_list: list):
         conn.close()
         return True
     except Exception as e:
-        logger.error(f"Ошибка обновления медиа клиента {item_id}: {e}")
+        logger.error(f"❌ Ошибка обновления медиа клиента {item_id}: {e}")
         return False
 
 def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
@@ -1121,7 +1110,7 @@ def add_pack(name, full_desc, url, version, author, is_vip=0, media=None):
         logger.info(f"✅ Ресурспак добавлен во временную БД: ID={item_id}, name={name}")
         return item_id
     except Exception as e:
-        logger.error(f"Ошибка добавления ресурспака: {e}")
+        logger.error(f"❌ Ошибка добавления ресурспака: {e}")
         return None
 
 def update_pack(item_id, field, value):
@@ -1143,7 +1132,7 @@ def update_pack_media(item_id: int, media_list: list):
         conn.close()
         return True
     except Exception as e:
-        logger.error(f"Ошибка обновления медиа ресурспака {item_id}: {e}")
+        logger.error(f"❌ Ошибка обновления медиа ресурспака {item_id}: {e}")
         return False
 
 def toggle_favorite(user_id, pack_id):
@@ -1164,7 +1153,7 @@ def toggle_favorite(user_id, pack_id):
             conn.close()
             return True
     except Exception as e:
-        logger.error(f"Ошибка переключения избранного: {e}")
+        logger.error(f"❌ Ошибка переключения избранного: {e}")
         return False
 
 def get_favorites(user_id):
@@ -1196,7 +1185,7 @@ def get_favorites(user_id):
         conn.close()
         return converted_favs
     except Exception as e:
-        logger.error(f"Ошибка получения избранного: {e}")
+        logger.error(f"❌ Ошибка получения избранного: {e}")
         return []
 
 def increment_view(table, item_id):
@@ -1207,7 +1196,7 @@ def increment_view(table, item_id):
         conn.commit()
         conn.close()
     except Exception as e:
-        logger.error(f"Ошибка увеличения просмотров: {e}")
+        logger.error(f"❌ Ошибка увеличения просмотров: {e}")
 
 def increment_download(table, item_id, vip_item=False):
     try:
@@ -1217,7 +1206,7 @@ def increment_download(table, item_id, vip_item=False):
         conn.commit()
         conn.close()
     except Exception as e:
-        logger.error(f"Ошибка увеличения скачиваний: {e}")
+        logger.error(f"❌ Ошибка увеличения скачиваний: {e}")
 
 def format_number(num):
     if num is None:
@@ -1310,7 +1299,6 @@ def get_items_keyboard(items, category, page, total_pages, show_vip=False):
     buttons = []
     for item in items:
         if category == "configs":
-            # Для конфигов новая структура
             if len(item) >= 8:
                 item_id, client_name, client_version, name, full_desc, media_json, downloads, is_vip = item[:8]
             else:
@@ -1369,9 +1357,19 @@ def get_admin_main_keyboard():
         [InlineKeyboardButton(text="🎨 Ресурспаки", callback_data="admin_packs")],
         [InlineKeyboardButton(text="⚙️ Конфиги", callback_data="admin_configs")],
         [InlineKeyboardButton(text="👑 VIP управление", callback_data="admin_vip")],
+        [InlineKeyboardButton(text="🗄️ Управление БД", callback_data="admin_db_management")],
         [InlineKeyboardButton(text="📦 ZIP Бэкапы", callback_data="admin_zip_backups")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_db_management_keyboard():
+    """Клавиатура для управления БД"""
+    buttons = [
+        [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data="save_edit_all")],
+        [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ВСЕ ИЗМЕНЕНИЯ", callback_data="cancel_edit_all")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1405,6 +1403,8 @@ def get_admin_list_keyboard(items, category, page, total_pages, action):
     if nav_row:
         buttons.append(nav_row)
     
+    buttons.append([InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")])
+    buttons.append([InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1419,7 +1419,7 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔢 Версия", callback_data=f"edit_field_{category}_version_{item_id}")],
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
-            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"not_a_button")],
             [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
             [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
@@ -1432,7 +1432,7 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="✍️ Автор", callback_data=f"edit_field_{category}_author_{item_id}")],
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
-            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"not_a_button")],
             [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
             [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
@@ -1445,7 +1445,7 @@ def get_edit_item_keyboard(category, item_id, media_count=0, is_vip=False):
             [InlineKeyboardButton(text="🔢 Версия клиента", callback_data=f"edit_field_{category}_client_version_{item_id}")],
             [InlineKeyboardButton(text="🔗 Ссылка", callback_data=f"edit_field_{category}_download_url_{item_id}")],
             [InlineKeyboardButton(text=f"🖼️ Фото ({media_count})", callback_data=f"edit_media_{category}_{item_id}")],
-            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"toggle_vip_{category}_{item_id}")],
+            [InlineKeyboardButton(text=f"{vip_status}", callback_data=f"not_a_button")],
             [InlineKeyboardButton(text="✅ СОХРАНИТЬ БД", callback_data=f"save_edit_{category}")],
             [InlineKeyboardButton(text="❌ ОТМЕНИТЬ ИЗМЕНЕНИЯ", callback_data=f"cancel_edit_{category}")],
             [InlineKeyboardButton(text="◀️ Назад к списку", callback_data=f"edit_{category}_list")]
@@ -1593,7 +1593,7 @@ async def packs_version_selected(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"🎨 Ресурспаки для версии {version} (стр 1/{total_pages}):", reply_markup=get_items_keyboard(items, "packs", 1, total_pages, show_vip=True))
     await callback.answer()
 
-# ========== НОВАЯ ЛОГИКА ДЛЯ КОНФИГОВ ==========
+# ========== ЛОГИКА ДЛЯ КОНФИГОВ ==========
 
 @dp.message(F.text == "⚙️ Конфиги")
 async def configs_menu(message: Message, state: FSMContext):
@@ -1723,7 +1723,7 @@ async def config_detail_view(callback: CallbackQuery, state: FSMContext):
         item_is_vip = item[6] == 1 if len(item) > 6 else False
         downloads = int(item[7]) if len(item) > 7 and item[7] else 0
         views = int(item[8]) if len(item) > 8 and item[8] else 0
-        client_name = name  # используем название конфига как имя клиента для старой структуры
+        client_name = name
     
     try:
         media_list = json.loads(media) if media else []
@@ -2256,6 +2256,65 @@ async def admin_back(callback: CallbackQuery):
     await callback.message.delete()
     await callback.answer()
 
+# ========== УПРАВЛЕНИЕ БД ==========
+
+@dp.callback_query(lambda c: c.data == "admin_db_management")
+async def admin_db_management(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    # Проверяем, есть ли временная БД
+    if TEMP_DB_PATH.exists():
+        status = "🟢 ЕСТЬ несохраненные изменения"
+    else:
+        status = "🔴 НЕТ несохраненных изменений"
+    
+    text = f"🗄️ УПРАВЛЕНИЕ БАЗОЙ ДАННЫХ\n\n"
+    text += f"Статус временной БД: {status}\n\n"
+    text += "Вы можете сохранить все изменения или отменить их."
+    
+    await callback.message.edit_text(text, reply_markup=get_db_management_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "save_edit_all")
+async def save_all_changes(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    if apply_temp_db_changes():
+        await callback.message.edit_text(
+            "✅ Все изменения сохранены! База данных обновлена.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад в админку", callback_data="admin_back")]])
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка при сохранении изменений. Возможно, нет временной БД.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_db_management")]])
+        )
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "cancel_edit_all")
+async def cancel_all_changes(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    if cancel_temp_db_changes():
+        await callback.message.edit_text(
+            "❌ Все изменения отменены. База данных не изменена.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад в админку", callback_data="admin_back")]])
+        )
+    else:
+        await callback.message.edit_text(
+            "⚠️ Временная БД уже удалена или произошла ошибка.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_db_management")]])
+        )
+    
+    await callback.answer()
+
 @dp.callback_query(lambda c: c.data == "admin_vip")
 async def admin_vip(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -2346,6 +2405,16 @@ async def admin_clients(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
+    # Создаем временную копию БД для редактирования
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
+        )
+        await callback.answer()
+        return
+    
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить клиента", callback_data="add_client")],
         [InlineKeyboardButton(text="✏️ Редактировать клиента", callback_data="edit_clients_list")],
@@ -2361,6 +2430,16 @@ async def admin_packs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
+    # Создаем временную копию БД для редактирования
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
+        )
+        await callback.answer()
+        return
+    
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить ресурспак", callback_data="add_pack")],
         [InlineKeyboardButton(text="✏️ Редактировать ресурспак", callback_data="edit_packs_list")],
@@ -2378,6 +2457,16 @@ async def admin_configs(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
+    
+    # Создаем временную копию БД для редактирования
+    if not create_temp_db():
+        await callback.message.edit_text(
+            "❌ Ошибка создания временной копии БД", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]])
+        )
+        await callback.answer()
+        return
+    
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить конфиг", callback_data="add_config_start")],
         [InlineKeyboardButton(text="✏️ Редактировать конфиг", callback_data="edit_configs_list")],
@@ -2394,15 +2483,6 @@ async def admin_configs(callback: CallbackQuery):
 async def add_config_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    # Создаем временную копию БД для добавления
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
-        )
-        await callback.answer()
         return
     
     await state.set_state(AdminStates.config_client_name)
@@ -2514,15 +2594,6 @@ async def add_client_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    # Создаем временную копию БД для добавления
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
-        )
-        await callback.answer()
-        return
-    
     await state.set_state(AdminStates.client_name)
     await callback.message.edit_text("📝 Введи название клиента:")
     await callback.answer()
@@ -2624,14 +2695,6 @@ async def client_media(message: Message, state: FSMContext):
 async def add_pack_start(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
-        )
-        await callback.answer()
         return
     
     await state.set_state(AdminStates.pack_name)
@@ -2741,14 +2804,6 @@ async def pack_media(message: Message, state: FSMContext):
 async def edit_configs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
-        )
-        await callback.answer()
         return
     
     items, total = get_all_items_paginated("configs", 1, 50, use_temp=True)
@@ -2923,14 +2978,6 @@ async def edit_config_field_start(callback: CallbackQuery, state: FSMContext):
 async def delete_configs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_configs")]])
-        )
-        await callback.answer()
         return
     
     items, total = get_all_items_paginated("configs", 1, 50, use_temp=True)
@@ -3205,14 +3252,6 @@ async def edit_clients_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
-        )
-        await callback.answer()
-        return
-    
     items, total = get_all_items_paginated("clients", 1, 50, use_temp=True)
     total_pages = max(1, (total + 49) // 50)
     
@@ -3334,14 +3373,6 @@ async def edit_packs_list(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
     
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
-        )
-        await callback.answer()
-        return
-    
     items, total = get_all_items_paginated("resourcepacks", 1, 50, use_temp=True)
     total_pages = max(1, (total + 49) // 50)
     
@@ -3455,192 +3486,12 @@ async def edit_pack_select(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ========== ОБЩИЕ ФУНКЦИИ РЕДАКТИРОВАНИЯ ==========
-
-@dp.callback_query(lambda c: c.data.startswith("edit_field_") and not c.data.startswith("edit_field_configs_"))
-async def edit_field_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    category = parts[2]
-    field = parts[3]
-    item_id = int(parts[4])
-    
-    field_map = {
-        'name': 'name',
-        'full_desc': 'full_desc',
-        'version': 'version',
-        'author': 'author',
-        'download_url': 'download_url'
-    }
-    
-    db_field = field_map.get(field)
-    if not db_field:
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-    
-    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category=category)
-    await state.set_state(AdminStates.edit_value)
-    
-    await callback.message.edit_text(f"✏️ Введи новое значение для поля {field}:")
-    await callback.answer()
-
-@dp.message(AdminStates.edit_value)
-async def edit_value(message: Message, state: FSMContext):
-    data = await state.get_data()
-    item_id = data.get('edit_item_id')
-    field = data.get('edit_field')
-    category = data.get('edit_category')
-    
-    if not item_id or not field or not category:
-        await message.answer("❌ Ошибка: нет данных для редактирования")
-        await state.clear()
-        return
-    
-    success = False
-    if category == 'clients':
-        success = update_item_in_temp("clients", item_id, field, message.text)
-    elif category == 'packs':
-        success = update_item_in_temp("resourcepacks", item_id, field, message.text)
-    elif category == 'configs':
-        success = update_item_in_temp("configs", item_id, field, message.text)
-    
-    await state.clear()
-    
-    if success:
-        await message.answer("✅ Значение обновлено во временной БД!\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
-    else:
-        await message.answer("❌ Ошибка при обновлении", reply_markup=get_main_keyboard(is_admin=True))
-
-# ========== РЕДАКТИРОВАНИЕ МЕДИА ==========
-
-@dp.callback_query(lambda c: c.data.startswith("edit_media_"))
-async def edit_media_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    category = parts[2]
-    item_id = int(parts[3])
-    
-    item = get_item(category, item_id, use_temp=True)
-    if not item:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
-        return
-    
-    media_index = 5 if category == "configs" and len(item) > 5 else 3
-    
-    try:
-        media_list = json.loads(item[media_index]) if len(item) > media_index and item[media_index] else []
-    except:
-        media_list = []
-    
-    await state.update_data(edit_item_id=item_id, edit_category=category, media_list=media_list)
-    await state.set_state(AdminStates.edit_media)
-    
-    media_count = len(media_list)
-    name = item[1] if category != "configs" else (item[3] if len(item) > 3 else "Конфиг")
-    text = f"🖼️ Управление фото для {name}\n\nСейчас фото: {media_count}\n\n"
-    if media_count > 0:
-        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
-    
-    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard(category, item_id))
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("add_media_"))
-async def add_media_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    category = parts[2]
-    item_id = int(parts[3])
-    
-    await state.update_data(edit_item_id=item_id, edit_category=category)
-    await callback.message.edit_text("📸 Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'отмена' чтобы выйти")
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("del_media_"))
-async def delete_media(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    category = parts[2]
-    item_id = int(parts[3])
-    
-    success = False
-    if category == "clients":
-        success = update_client_media(item_id, [])
-    elif category == "packs":
-        success = update_pack_media(item_id, [])
-    elif category == "configs":
-        success = update_config_media(item_id, [])
-    
-    if success:
-        await callback.message.edit_text("✅ Все фото удалены из временной БД!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
-    else:
-        await callback.message.edit_text("❌ Ошибка при удалении фото", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
-    await callback.answer()
-
-@dp.message(AdminStates.edit_media)
-async def handle_media_edit(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await state.clear()
-        return
-    
-    data = await state.get_data()
-    item_id = data.get('edit_item_id')
-    category = data.get('edit_category')
-    current_media = data.get('media_list', [])
-    
-    if message.text and message.text.lower() == 'готово':
-        success = False
-        if category == 'clients':
-            success = update_client_media(item_id, current_media)
-        elif category == 'packs':
-            success = update_pack_media(item_id, current_media)
-        elif category == 'configs':
-            success = update_config_media(item_id, current_media)
-        
-        await state.clear()
-        if success:
-            await message.answer(f"✅ Фото сохранено во временной БД! Всего: {len(current_media)}\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
-        else:
-            await message.answer("❌ Ошибка при сохранении фото", reply_markup=get_main_keyboard(is_admin=True))
-        return
-    
-    if message.text and message.text.lower() == 'отмена':
-        await state.clear()
-        await message.answer("❌ Редактирование отменено", reply_markup=get_main_keyboard(is_admin=True))
-        return
-    
-    if message.photo:
-        current_media.append({'type': 'photo', 'id': message.photo[-1].file_id})
-        await state.update_data(media_list=current_media)
-        await message.answer(f"✅ Фото добавлено во временную БД! Всего: {len(current_media)}\nМожешь отправить ещё фото или написать 'готово'")
-    else:
-        await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
-
 # ========== УДАЛЕНИЕ КЛИЕНТОВ ==========
 
 @dp.callback_query(lambda c: c.data == "delete_clients_list")
 async def delete_clients_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_clients")]])
-        )
-        await callback.answer()
         return
     
     items, total = get_all_items_paginated("clients", 1, 50, use_temp=True)
@@ -3778,14 +3629,6 @@ async def delete_client_execute(callback: CallbackQuery):
 async def delete_packs_list(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
-        return
-    
-    if not create_temp_db():
-        await callback.message.edit_text(
-            "❌ Ошибка создания временной копии БД", 
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_packs")]])
-        )
-        await callback.answer()
         return
     
     items, total = get_all_items_paginated("resourcepacks", 1, 50, use_temp=True)
@@ -4123,6 +3966,178 @@ async def toggle_vip_packs_page(callback: CallbackQuery):
     
     await callback.answer()
 
+# ========== ОБЩИЕ ФУНКЦИИ РЕДАКТИРОВАНИЯ ==========
+
+@dp.callback_query(lambda c: c.data.startswith("edit_field_") and not c.data.startswith("edit_field_configs_"))
+async def edit_field_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    field = parts[3]
+    item_id = int(parts[4])
+    
+    field_map = {
+        'name': 'name',
+        'full_desc': 'full_desc',
+        'version': 'version',
+        'author': 'author',
+        'download_url': 'download_url'
+    }
+    
+    db_field = field_map.get(field)
+    if not db_field:
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    
+    await state.update_data(edit_item_id=item_id, edit_field=db_field, edit_category=category)
+    await state.set_state(AdminStates.edit_value)
+    
+    await callback.message.edit_text(f"✏️ Введи новое значение для поля {field}:")
+    await callback.answer()
+
+@dp.message(AdminStates.edit_value)
+async def edit_value(message: Message, state: FSMContext):
+    data = await state.get_data()
+    item_id = data.get('edit_item_id')
+    field = data.get('edit_field')
+    category = data.get('edit_category')
+    
+    if not item_id or not field or not category:
+        await message.answer("❌ Ошибка: нет данных для редактирования")
+        await state.clear()
+        return
+    
+    success = False
+    if category == 'clients':
+        success = update_item_in_temp("clients", item_id, field, message.text)
+    elif category == 'packs':
+        success = update_item_in_temp("resourcepacks", item_id, field, message.text)
+    elif category == 'configs':
+        success = update_item_in_temp("configs", item_id, field, message.text)
+    
+    await state.clear()
+    
+    if success:
+        await message.answer("✅ Значение обновлено во временной БД!\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
+    else:
+        await message.answer("❌ Ошибка при обновлении", reply_markup=get_main_keyboard(is_admin=True))
+
+# ========== РЕДАКТИРОВАНИЕ МЕДИА ==========
+
+@dp.callback_query(lambda c: c.data.startswith("edit_media_"))
+async def edit_media_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    item_id = int(parts[3])
+    
+    item = get_item(category, item_id, use_temp=True)
+    if not item:
+        await callback.answer("❌ Элемент не найден", show_alert=True)
+        return
+    
+    media_index = 5 if category == "configs" and len(item) > 5 else 3
+    
+    try:
+        media_list = json.loads(item[media_index]) if len(item) > media_index and item[media_index] else []
+    except:
+        media_list = []
+    
+    await state.update_data(edit_item_id=item_id, edit_category=category, media_list=media_list)
+    await state.set_state(AdminStates.edit_media)
+    
+    media_count = len(media_list)
+    name = item[1] if category != "configs" else (item[3] if len(item) > 3 else "Конфиг")
+    text = f"🖼️ Управление фото для {name}\n\nСейчас фото: {media_count}\n\n"
+    if media_count > 0:
+        text += "Чтобы удалить все фото, нажми кнопку ниже.\nЧтобы добавить новые, просто отправь фото."
+    
+    await callback.message.edit_text(text, reply_markup=get_edit_media_keyboard(category, item_id))
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("add_media_"))
+async def add_media_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    item_id = int(parts[3])
+    
+    await state.update_data(edit_item_id=item_id, edit_category=category)
+    await callback.message.edit_text("📸 Отправляй фото (можно несколько)\n\nПосле того как отправишь все фото, напиши 'готово'\nИли напиши 'отмена' чтобы выйти")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("del_media_"))
+async def delete_media(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    category = parts[2]
+    item_id = int(parts[3])
+    
+    success = False
+    if category == "clients":
+        success = update_client_media(item_id, [])
+    elif category == "packs":
+        success = update_pack_media(item_id, [])
+    elif category == "configs":
+        success = update_config_media(item_id, [])
+    
+    if success:
+        await callback.message.edit_text("✅ Все фото удалены из временной БД!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
+    else:
+        await callback.message.edit_text("❌ Ошибка при удалении фото", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"edit_media_{category}_{item_id}")]]))
+    await callback.answer()
+
+@dp.message(AdminStates.edit_media)
+async def handle_media_edit(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    
+    data = await state.get_data()
+    item_id = data.get('edit_item_id')
+    category = data.get('edit_category')
+    current_media = data.get('media_list', [])
+    
+    if message.text and message.text.lower() == 'готово':
+        success = False
+        if category == 'clients':
+            success = update_client_media(item_id, current_media)
+        elif category == 'packs':
+            success = update_pack_media(item_id, current_media)
+        elif category == 'configs':
+            success = update_config_media(item_id, current_media)
+        
+        await state.clear()
+        if success:
+            await message.answer(f"✅ Фото сохранено во временной БД! Всего: {len(current_media)}\n\nНе забудь сохранить изменения кнопкой 'СОХРАНИТЬ БД' в админке!", reply_markup=get_main_keyboard(is_admin=True))
+        else:
+            await message.answer("❌ Ошибка при сохранении фото", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.text and message.text.lower() == 'отмена':
+        await state.clear()
+        await message.answer("❌ Редактирование отменено", reply_markup=get_main_keyboard(is_admin=True))
+        return
+    
+    if message.photo:
+        current_media.append({'type': 'photo', 'id': message.photo[-1].file_id})
+        await state.update_data(media_list=current_media)
+        await message.answer(f"✅ Фото добавлено во временную БД! Всего: {len(current_media)}\nМожешь отправить ещё фото или написать 'готово'")
+    else:
+        await message.answer("❌ Отправь фото, или напиши 'готово' / 'отмена'")
+
 # ========== СОХРАНЕНИЕ И ОТМЕНА ИЗМЕНЕНИЙ ==========
 
 @dp.callback_query(lambda c: c.data.startswith("save_edit_"))
@@ -4133,6 +4148,7 @@ async def save_edit_changes(callback: CallbackQuery):
     
     category = callback.data.replace("save_edit_", "")
     
+    # Применяем изменения из временной БД
     if apply_temp_db_changes():
         await callback.message.edit_text(
             f"✅ Изменения сохранены! База данных обновлена.",
@@ -4140,7 +4156,7 @@ async def save_edit_changes(callback: CallbackQuery):
         )
     else:
         await callback.message.edit_text(
-            f"❌ Ошибка при сохранении изменений",
+            f"❌ Ошибка при сохранении изменений. Возможно, нет временной БД.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]])
         )
     
@@ -4154,6 +4170,7 @@ async def cancel_edit_changes(callback: CallbackQuery):
     
     category = callback.data.replace("cancel_edit_", "")
     
+    # Отменяем изменения, удаляя временную БД
     if cancel_temp_db_changes():
         await callback.message.edit_text(
             f"❌ Изменения отменены. База данных не изменена.",
@@ -4161,10 +4178,20 @@ async def cancel_edit_changes(callback: CallbackQuery):
         )
     else:
         await callback.message.edit_text(
-            f"⚠️ Временная БД уже удалена или произошла ошибка",
+            f"⚠️ Временная БД уже удалена или произошла ошибка.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_{category}")]])
         )
     
+    await callback.answer()
+
+# ========== ПЛЮШКА ДЛЯ НЕРАБОЧИХ КНОПОК ==========
+
+@dp.callback_query(lambda c: c.data == "not_a_button")
+async def not_a_button(callback: CallbackQuery):
+    await callback.answer("🔘 Это не кнопка!", show_alert=True)
+
+@dp.callback_query(lambda c: c.data == "noop")
+async def noop(callback: CallbackQuery):
     await callback.answer()
 
 # ========== ФУНКЦИИ ДЛЯ БЭКАПОВ ==========
@@ -4610,12 +4637,12 @@ async def show_media(message: Message, state: FSMContext, index: int):
     if index > 0:
         nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"media_nav_{index-1}"))
     else:
-        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data="noop"))
-    nav_buttons.append(InlineKeyboardButton(text=f"{index+1}/{len(media_list)}", callback_data="noop"))
+        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data="not_a_button"))
+    nav_buttons.append(InlineKeyboardButton(text=f"{index+1}/{len(media_list)}", callback_data="not_a_button"))
     if index < len(media_list) - 1:
         nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"media_nav_{index+1}"))
     else:
-        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data="noop"))
+        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data="not_a_button"))
     buttons = [nav_buttons, [InlineKeyboardButton(text="◀️ Назад", callback_data="media_back")]]
     await state.update_data(media_index=index)
     try:
@@ -4651,10 +4678,6 @@ async def media_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "noop")
-async def noop(callback: CallbackQuery):
-    await callback.answer()
-
 @dp.callback_query(lambda c: c.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -4676,6 +4699,7 @@ async def main():
     print("   • 💎 VIP контент")
     print("   • 🎮 Клиенты, ресурспаки, конфиги")
     print("   • 👑 VIP управление")
+    print("   • 🗄️ Управление БД (сохранение/отмена изменений)")
     print("   • 📦 Бэкапы")
     print("   • 📢 Рассылка")
     print("   • 🔍 Диагностика БД (/check_db, /debug_admin)")
